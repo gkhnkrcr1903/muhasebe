@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Seans Muhasebe</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <!-- Giriş -->
+  <section id="giris-ekrani" class="giris hidden">
+    <form id="giris-form" class="kart">
+      <h1>Seans Muhasebe</h1>
+      <label>Kullanıcı adı <input name="username" autocomplete="username" required></label>
+      <label>Şifre <input name="password" type="password" autocomplete="current-password" required></label>
+      <button type="submit">Giriş yap</button>
+      <p class="hata" id="giris-hata"></p>
+    </form>
+  </section>
+
+  <!-- Uygulama -->
+  <div id="uygulama" class="hidden">
+    <header>
+      <strong>Seans Muhasebe</strong>
+      <nav>
+        <button data-sekme="plan" class="aktif">Haftalık Plan</button>
+        <button data-sekme="danisanlar">Danışanlar</button>
+        <button data-sekme="rapor">Ücret Raporu</button>
+        <button data-sekme="ayarlar">Ayarlar</button>
+      </nav>
+      <span class="kullanici"><span id="ben-ad"></span> <button id="cikis" class="ikincil">Çıkış</button></span>
+    </header>
+
+    <main>
+      <!-- Haftalık plan -->
+      <section id="sekme-plan" class="sekme">
+        <div class="arac-cubugu">
+          <button id="hafta-onceki" class="ikincil">‹ Önceki</button>
+          <strong id="hafta-baslik"></strong>
+          <button id="hafta-sonraki" class="ikincil">Sonraki ›</button>
+          <button id="hafta-bugun" class="ikincil">Bu hafta</button>
+          <select id="plan-filtre" class="sadece-admin"><option value="">Herkes</option></select>
+          <span class="bosluk"></span>
+          <button id="seans-ekle">+ Seans ekle</button>
+        </div>
+        <div id="hafta-ozet" class="ozet"></div>
+        <div id="hafta-grid" class="hafta-grid"></div>
+      </section>
+
+      <!-- Danışanlar -->
+      <section id="sekme-danisanlar" class="sekme hidden">
+        <div class="arac-cubugu">
+          <input id="danisan-ara" placeholder="Danışan ara…">
+          <label class="satir"><input type="checkbox" id="danisan-pasif"> Pasifleri göster</label>
+          <span class="bosluk"></span>
+          <button id="danisan-ekle">+ Danışan ekle</button>
+        </div>
+        <table class="tablo">
+          <thead><tr><th>Ad</th><th>Telefon</th><th>Varsayılan ücret</th><th>Not</th><th>Durum</th><th></th></tr></thead>
+          <tbody id="danisan-liste"></tbody>
+        </table>
+      </section>
+
+      <!-- Rapor -->
+      <section id="sekme-rapor" class="sekme hidden">
+        <div class="arac-cubugu">
+          <label>Gruplama
+            <select id="rapor-grup"><option value="hafta">Haftalık</option><option value="ay">Aylık</option></select>
+          </label>
+          <label>Başlangıç <input type="date" id="rapor-bas"></label>
+          <label>Bitiş <input type="date" id="rapor-bit"></label>
+          <button id="rapor-getir">Hesapla</button>
+          <button id="rapor-csv" class="ikincil">CSV indir</button>
+        </div>
+        <div id="rapor-toplam" class="ozet"></div>
+        <table class="tablo">
+          <thead><tr><th>Dönem</th><th>Seansı alan</th><th>Seans</th><th>Tamamlanan</th><th>Toplam ücret</th><th>Tahsil edilen</th><th>Bekleyen</th></tr></thead>
+          <tbody id="rapor-liste"></tbody>
+        </table>
+        <p class="ipucu">İptal edilen seanslar hesaplamaya dahil edilmez.</p>
+      </section>
+
+      <!-- Ayarlar -->
+      <section id="sekme-ayarlar" class="sekme hidden">
+        <form id="sifre-form" class="kart dar">
+          <h3>Şifremi değiştir</h3>
+          <label>Mevcut şifre <input type="password" name="eski" required></label>
+          <label>Yeni şifre <input type="password" name="yeni" minlength="6" required></label>
+          <button type="submit">Kaydet</button>
+        </form>
+        <div class="kart dar sadece-admin">
+          <h3>Kullanıcı şifresi sıfırla</h3>
+          <form id="sifirla-form">
+            <label>Kullanıcı <select name="id" id="sifirla-kullanici"></select></label>
+            <label>Yeni şifre <input type="password" name="yeni" minlength="6" required></label>
+            <button type="submit">Sıfırla</button>
+          </form>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Seans formu -->
+  <dialog id="seans-dialog">
+    <form id="seans-form" method="dialog">
+      <h3 id="seans-baslik">Seans</h3>
+      <input type="hidden" name="id">
+      <label>Danışan <select name="danisan_id" required></select></label>
+      <label>Seansı alacak <select name="user_id" required></select></label>
+      <div class="ikili">
+        <label>Tarih <input type="date" name="tarih" required></label>
+        <label>Saat <input type="time" name="saat"></label>
+      </div>
+      <div class="ikili">
+        <label>Ücret (₺) <input type="number" name="ucret" min="0" step="0.01"></label>
+        <label>Durum
+          <select name="durum">
+            <option value="planlandi">Planlandı</option>
+            <option value="tamamlandi">Tamamlandı</option>
+            <option value="iptal">İptal</option>
+          </select>
+        </label>
+      </div>
+      <label class="satir"><input type="checkbox" name="odendi"> Ödeme alındı</label>
+      <label>Not <textarea name="notlar" rows="2"></textarea></label>
+      <details id="seans-gecmis-kutu" class="hidden"><summary>Değişiklik geçmişi</summary><ul id="seans-gecmis"></ul></details>
+      <p class="hata" id="seans-hata"></p>
+      <div class="butonlar">
+        <button type="button" id="seans-sil" class="tehlike">Sil</button>
+        <span class="bosluk"></span>
+        <button type="button" class="ikincil" data-kapat>Vazgeç</button>
+        <button type="submit">Kaydet</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Danışan formu -->
+  <dialog id="danisan-dialog">
+    <form id="danisan-form" method="dialog">
+      <h3>Danışan</h3>
+      <input type="hidden" name="id">
+      <label>Ad soyad <input name="ad" required></label>
+      <label>Telefon <input name="telefon"></label>
+      <label>Varsayılan seans ücreti (₺) <input type="number" name="varsayilan_ucret" min="0" step="0.01"></label>
+      <label>Not <textarea name="notlar" rows="2"></textarea></label>
+      <label class="satir"><input type="checkbox" name="aktif" checked> Aktif</label>
+      <p class="hata" id="danisan-hata"></p>
+      <div class="butonlar">
+        <span class="bosluk"></span>
+        <button type="button" class="ikincil" data-kapat>Vazgeç</button>
+        <button type="submit">Kaydet</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="bildirim" class="bildirim"></div>
+  <script src="/app.js"></script>
+</body>
+</html>
