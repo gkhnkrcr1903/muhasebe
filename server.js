@@ -89,7 +89,15 @@ app.post('/api/sifre', h(async (req, res) => {
 
 // ---------- Kullanıcılar ----------
 app.get('/api/kullanicilar', h(async (req, res) => {
-  res.json(await db.all('SELECT id, username, display_name, role FROM users ORDER BY id'));
+  res.json(await db.all('SELECT id, username, display_name, role, komisyon_orani FROM users ORDER BY id'));
+}));
+
+app.put('/api/kullanicilar/:id/komisyon', adminOnly, h(async (req, res) => {
+  const oran = Number(req.body?.komisyon_orani);
+  if (!Number.isFinite(oran) || oran < 0 || oran > 100) return res.status(400).json({ hata: 'Oran 0 ile 100 arasında olmalı' });
+  const changes = await db.run('UPDATE users SET komisyon_orani = $1 WHERE id = $2', [oran, Number(req.params.id)]);
+  if (!changes) return res.status(404).json({ hata: 'Kullanıcı bulunamadı' });
+  res.json({ ok: true });
 }));
 
 app.post('/api/kullanicilar/:id/sifre', adminOnly, h(async (req, res) => {
@@ -118,6 +126,21 @@ app.put('/api/danisanlar/:id', h(async (req, res) => {
   if (!ad || !String(ad).trim()) return res.status(400).json({ hata: 'Danışan adı gerekli' });
   res.json(await db.get('UPDATE danisanlar SET ad = $1, telefon = $2, varsayilan_ucret = $3, notlar = $4, aktif = $5 WHERE id = $6 RETURNING *',
     [String(ad).trim(), telefon || null, Number(varsayilan_ucret) || 0, notlar || null, aktif === false || aktif === 0 ? 0 : 1, Number(req.params.id)]));
+}));
+
+// Danışanın seansları ve borç/ödeme durumu
+app.get('/api/danisanlar/:id/hesap', h(async (req, res) => {
+  const id = Number(req.params.id);
+  const danisan = await db.get('SELECT * FROM danisanlar WHERE id = $1', [id]);
+  if (!danisan) return res.status(404).json({ hata: 'Danışan bulunamadı' });
+  const params = [id];
+  let where = 'WHERE s.danisan_id = $1';
+  if (!isAdmin(req)) { params.push(req.user.id); where += ` AND s.user_id = $${params.length}`; }
+  const seanslar = await db.all(`${SEANS_SELECT} ${where} ORDER BY s.tarih DESC, s.saat DESC`, params);
+  const gecerli = seanslar.filter((s) => s.durum !== 'iptal');
+  const toplam = gecerli.reduce((a, s) => a + s.ucret, 0);
+  const odenen = gecerli.filter((s) => s.odendi).reduce((a, s) => a + s.ucret, 0);
+  res.json({ danisan, seanslar, ozet: { seans_sayisi: gecerli.length, toplam, odenen, borc: toplam - odenen } });
 }));
 
 // ---------- Seanslar ----------
@@ -175,12 +198,28 @@ app.post('/api/seanslar', h(async (req, res) => {
   };
   const err = await validateSeans(req, data);
   if (err) return res.status(400).json({ hata: err });
-  const { id } = await db.get(`INSERT INTO seanslar (danisan_id, user_id, tarih, saat, ucret, durum, odendi, notlar)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-    [data.danisan_id, data.user_id, data.tarih, data.saat, data.ucret, data.durum, data.odendi, data.notlar]);
-  await logChange(id, req.user.id, 'Seans oluşturuldu');
-  res.json(await getSeans(id));
+  // tekrar: aynı seansı sonraki N haftaya da ekle (en fazla 52)
+  const tekrar = Math.min(Math.max(parseInt(b.tekrar, 10) || 0, 0), 52);
+  let ilkId;
+  for (let i = 0; i <= tekrar; i++) {
+    const tarih = i === 0 ? data.tarih : gunEkle(data.tarih, 7 * i);
+    // Tekrarlanan seanslar planlandı ve ödenmemiş olarak başlar
+    const durum = i === 0 ? data.durum : 'planlandi';
+    const odendi = i === 0 ? data.odendi : 0;
+    const { id } = await db.get(`INSERT INTO seanslar (danisan_id, user_id, tarih, saat, ucret, durum, odendi, notlar)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+      [data.danisan_id, data.user_id, tarih, data.saat, data.ucret, durum, odendi, data.notlar]);
+    await logChange(id, req.user.id, i === 0 ? 'Seans oluşturuldu' : `Tekrarlayan seans olarak oluşturuldu (${i}. hafta)`);
+    ilkId ??= id;
+  }
+  res.json({ ...(await getSeans(ilkId)), olusturulan: tekrar + 1 });
 }));
+
+function gunEkle(tarih, gun) {
+  const d = new Date(`${tarih}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + gun);
+  return d.toISOString().slice(0, 10);
+}
 
 app.put('/api/seanslar/:id', h(async (req, res) => {
   const id = Number(req.params.id);
@@ -243,7 +282,7 @@ app.get('/api/rapor', h(async (req, res) => {
   let where = "WHERE s.tarih BETWEEN $1 AND $2 AND s.durum != 'iptal'";
   if (!isAdmin(req)) { params.push(req.user.id); where += ` AND s.user_id = $${params.length}`; }
   const rows = await db.all(`
-    SELECT ${donemExpr} AS donem, s.user_id, u.display_name AS kullanici_ad,
+    SELECT ${donemExpr} AS donem, s.user_id, u.display_name AS kullanici_ad, u.komisyon_orani,
       COUNT(*)::int AS seans_sayisi,
       SUM(CASE WHEN s.durum = 'tamamlandi' THEN 1 ELSE 0 END)::int AS tamamlanan,
       SUM(s.ucret) AS toplam_ucret,
@@ -252,7 +291,131 @@ app.get('/api/rapor', h(async (req, res) => {
     FROM seanslar s JOIN users u ON u.id = s.user_id
     ${where}
     GROUP BY donem, s.user_id, u.display_name, u.id ORDER BY donem DESC, u.id`, params);
+  for (const r of rows) {
+    r.komisyon = Math.round(r.toplam_ucret * r.komisyon_orani) / 100;
+    r.net = r.toplam_ucret - r.komisyon;
+  }
   res.json({ grup, satirlar: rows });
+}));
+
+// ---------- Giderler (vergi, stopaj vb.) ----------
+const KATEGORILER = {
+  stopaj: 'Stopaj', kdv: 'KDV', gelir_vergisi: 'Gelir vergisi', gecici_vergi: 'Geçici vergi', damga: 'Damga vergisi',
+  sgk: 'SGK / Bağ-Kur', kira: 'Kira', fatura: 'Fatura (elektrik, su, internet)', maas: 'Maaş', muhasebe: 'Muhasebe',
+  malzeme: 'Malzeme', diger: 'Diğer',
+};
+const VERGI_KATEGORILERI = ['stopaj', 'kdv', 'gelir_vergisi', 'gecici_vergi', 'damga'];
+
+app.get('/api/gider-kategorileri', (req, res) => res.json({ kategoriler: KATEGORILER, vergi: VERGI_KATEGORILERI }));
+
+const GIDER_SELECT = `SELECT g.*, u.display_name AS kullanici_ad FROM giderler g LEFT JOIN users u ON u.id = g.user_id`;
+
+// Admin tüm giderleri (ortak dahil) görür; diğer kullanıcılar yalnızca kendilerine ait olanları.
+function giderFiltre(req, params, alias = 'g') {
+  if (!isAdmin(req)) { params.push(req.user.id); return ` AND ${alias}.user_id = $${params.length}`; }
+  const f = req.query.user_id;
+  if (f === 'ortak') return ` AND ${alias}.user_id IS NULL`;
+  if (f) { params.push(Number(f)); return ` AND ${alias}.user_id = $${params.length}`; }
+  return '';
+}
+
+async function validateGider(req, g) {
+  if (!DATE_RE.test(g.tarih || '')) return 'Geçerli bir tarih girin';
+  if (!KATEGORILER[g.kategori]) return 'Geçersiz kategori';
+  if (!(g.tutar > 0)) return 'Tutar sıfırdan büyük olmalı';
+  if (g.user_id !== null && !await db.get('SELECT 1 FROM users WHERE id = $1', [g.user_id])) return 'Kullanıcı bulunamadı';
+  if (!isAdmin(req) && g.user_id !== req.user.id) return 'Gideri yalnızca kendinize ekleyebilirsiniz';
+  return null;
+}
+function giderVerisi(req, b) {
+  const uid = b.user_id === null || b.user_id === '' || b.user_id === 'ortak' ? null : Number(b.user_id);
+  return {
+    tarih: b.tarih, kategori: b.kategori, aciklama: b.aciklama || null,
+    tutar: Math.round((Number(b.tutar) || 0) * 100) / 100,
+    user_id: isAdmin(req) ? (b.user_id === undefined ? null : uid) : req.user.id,
+  };
+}
+
+app.get('/api/giderler', h(async (req, res) => {
+  const { baslangic, bitis } = req.query;
+  if (!DATE_RE.test(baslangic || '') || !DATE_RE.test(bitis || '')) return res.status(400).json({ hata: 'Tarih aralığı gerekli' });
+  const params = [baslangic, bitis];
+  const where = 'WHERE g.tarih BETWEEN $1 AND $2' + giderFiltre(req, params);
+  res.json(await db.all(`${GIDER_SELECT} ${where} ORDER BY g.tarih DESC, g.id DESC`, params));
+}));
+
+app.post('/api/giderler', h(async (req, res) => {
+  const g = giderVerisi(req, req.body || {});
+  const err = await validateGider(req, g);
+  if (err) return res.status(400).json({ hata: err });
+  const { id } = await db.get(`INSERT INTO giderler (tarih, kategori, aciklama, tutar, user_id, olusturan_id)
+    VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`, [g.tarih, g.kategori, g.aciklama, g.tutar, g.user_id, req.user.id]);
+  res.json(await db.get(`${GIDER_SELECT} WHERE g.id = $1`, [id]));
+}));
+
+async function erisilebilirGider(req, id) {
+  const g = await db.get('SELECT * FROM giderler WHERE id = $1', [id]);
+  return g && (isAdmin(req) || g.user_id === req.user.id) ? g : null;
+}
+
+app.put('/api/giderler/:id', h(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!await erisilebilirGider(req, id)) return res.status(404).json({ hata: 'Gider bulunamadı' });
+  const g = giderVerisi(req, req.body || {});
+  const err = await validateGider(req, g);
+  if (err) return res.status(400).json({ hata: err });
+  await db.run('UPDATE giderler SET tarih = $1, kategori = $2, aciklama = $3, tutar = $4, user_id = $5 WHERE id = $6',
+    [g.tarih, g.kategori, g.aciklama, g.tutar, g.user_id, id]);
+  res.json(await db.get(`${GIDER_SELECT} WHERE g.id = $1`, [id]));
+}));
+
+app.delete('/api/giderler/:id', h(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!await erisilebilirGider(req, id)) return res.status(404).json({ hata: 'Gider bulunamadı' });
+  await db.run('DELETE FROM giderler WHERE id = $1', [id]);
+  res.json({ ok: true });
+}));
+
+// ---------- Gelir-gider raporu ----------
+app.get('/api/gelir-gider', h(async (req, res) => {
+  const { baslangic, bitis } = req.query;
+  const grup = req.query.grup === 'ay' ? 'ay' : 'hafta';
+  if (!DATE_RE.test(baslangic || '') || !DATE_RE.test(bitis || '')) return res.status(400).json({ hata: 'Tarih aralığı gerekli' });
+  const donem = (col) => grup === 'ay' ? `substr(${col}, 1, 7)` : `to_char(date_trunc('week', ${col}::date), 'YYYY-MM-DD')`;
+
+  // Gelir: iptal edilmeyen seanslar (ortak filtre seçiliyse ortak gelir olmadığından boş kalır)
+  const sp = [baslangic, bitis];
+  let sWhere = "WHERE s.tarih BETWEEN $1 AND $2 AND s.durum != 'iptal'";
+  if (!isAdmin(req)) { sp.push(req.user.id); sWhere += ` AND s.user_id = $${sp.length}`; }
+  else if (req.query.user_id === 'ortak') sWhere += ' AND false';
+  else if (req.query.user_id) { sp.push(Number(req.query.user_id)); sWhere += ` AND s.user_id = $${sp.length}`; }
+  const gelirler = await db.all(`
+    SELECT ${donem('s.tarih')} AS donem,
+      SUM(s.ucret) AS gelir,
+      SUM(CASE WHEN s.odendi = 1 THEN s.ucret ELSE 0 END) AS tahsilat,
+      SUM(s.ucret * u.komisyon_orani / 100) AS komisyon
+    FROM seanslar s JOIN users u ON u.id = s.user_id ${sWhere} GROUP BY 1`, sp);
+
+  const gp = [baslangic, bitis];
+  const gWhere = 'WHERE g.tarih BETWEEN $1 AND $2' + giderFiltre(req, gp);
+  const giderler = await db.all(`
+    SELECT ${donem('g.tarih')} AS donem, g.kategori, SUM(g.tutar) AS tutar
+    FROM giderler g ${gWhere} GROUP BY 1, 2`, gp);
+
+  const donemler = {};
+  const satir = (d) => (donemler[d] ||= { donem: d, gelir: 0, tahsilat: 0, komisyon: 0, vergi: 0, diger_gider: 0, kategoriler: {} });
+  for (const g of gelirler) Object.assign(satir(g.donem), { gelir: g.gelir, tahsilat: g.tahsilat, komisyon: Math.round(g.komisyon * 100) / 100 });
+  for (const g of giderler) {
+    const s = satir(g.donem);
+    s.kategoriler[g.kategori] = g.tutar;
+    if (VERGI_KATEGORILERI.includes(g.kategori)) s.vergi += g.tutar; else s.diger_gider += g.tutar;
+  }
+  const satirlar = Object.values(donemler).sort((a, b) => b.donem.localeCompare(a.donem));
+  for (const s of satirlar) {
+    s.toplam_gider = s.vergi + s.diger_gider + s.komisyon;
+    s.net = s.gelir - s.toplam_gider;
+  }
+  res.json({ grup, satirlar });
 }));
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));

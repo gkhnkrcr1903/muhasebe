@@ -69,9 +69,22 @@ async function baslat() {
   $('#plan-filtre').innerHTML = '<option value="">Herkes</option>' + terapistler.map((u) => `<option value="${u.id}">${esc(u.display_name)}</option>`).join('');
   $('#sifirla-kullanici').innerHTML = state.kullanicilar.map((u) => `<option value="${u.id}">${esc(u.display_name)} (${esc(u.username)})</option>`).join('');
 
+  const sahipSecenek = '<option value="ortak">Ortak</option>' + terapistler.map((u) => `<option value="${u.id}">${esc(u.display_name)}</option>`).join('');
+  $('#gider-filtre').innerHTML = '<option value="">Herkes</option>' + sahipSecenek;
+  $('#gg-filtre').innerHTML = '<option value="">Herkes</option>' + sahipSecenek;
+  giderForm.user_id.innerHTML = sahipSecenek;
+  komisyonAlanlariCiz(terapistler);
+
+  const k = await api('/api/gider-kategorileri');
+  state.kategoriler = k.kategoriler; state.vergiKategorileri = k.vergi;
+  giderForm.kategori.innerHTML = Object.entries(k.kategoriler).map(([v, ad]) => `<option value="${v}">${esc(ad)}</option>`).join('');
+
   const bugun = new Date();
-  $('#rapor-bas').value = iso(new Date(bugun.getFullYear(), bugun.getMonth(), 1));
-  $('#rapor-bit').value = iso(new Date(bugun.getFullYear(), bugun.getMonth() + 1, 0));
+  const ayBas = iso(new Date(bugun.getFullYear(), bugun.getMonth(), 1));
+  const aySon = iso(new Date(bugun.getFullYear(), bugun.getMonth() + 1, 0));
+  $('#rapor-bas').value = ayBas; $('#rapor-bit').value = aySon;
+  $('#gider-bas').value = ayBas; $('#gider-bit').value = aySon;
+  $('#gg-bas').value = iso(new Date(bugun.getFullYear(), 0, 1)); $('#gg-bit').value = iso(new Date(bugun.getFullYear(), 11, 31));
 
   await danisanlariYukle();
   await haftaYukle();
@@ -84,6 +97,8 @@ $$('header nav button').forEach((b) => b.addEventListener('click', () => {
   $(`#sekme-${b.dataset.sekme}`).classList.remove('hidden');
   if (b.dataset.sekme === 'rapor') raporGetir();
   if (b.dataset.sekme === 'danisanlar') danisanlariYukle();
+  if (b.dataset.sekme === 'giderler') giderGetir();
+  if (b.dataset.sekme === 'gelirgider') ggGetir();
 }));
 $$('[data-kapat]').forEach((b) => b.addEventListener('click', () => b.closest('dialog').close()));
 
@@ -165,6 +180,8 @@ async function seansFormAc(seans, tarih) {
   f.durum.value = seans?.durum || 'planlandi';
   f.odendi.checked = !!seans?.odendi;
   f.notlar.value = seans?.notlar || '';
+  f.tekrar.value = '0';
+  $('#tekrar-alan').classList.toggle('hidden', !!seans);
   $('#seans-baslik').textContent = seans ? 'Seansı düzenle' : 'Yeni seans';
   $('#seans-sil').classList.toggle('hidden', !seans);
   $('#seans-hata').textContent = '';
@@ -195,10 +212,14 @@ seansForm.addEventListener('submit', async (e) => {
     durum: f.durum.value, odendi: f.odendi.checked, notlar: f.notlar.value,
   };
   try {
+    let mesaj = 'Seans kaydedildi';
     if (f.id.value) await api(`/api/seanslar/${f.id.value}`, { method: 'PUT', body });
-    else await api('/api/seanslar', { method: 'POST', body });
+    else {
+      const r = await api('/api/seanslar', { method: 'POST', body: { ...body, tekrar: Number(f.tekrar.value) } });
+      if (r.olusturulan > 1) mesaj = `${r.olusturulan} seans oluşturuldu`;
+    }
     $('#seans-dialog').close();
-    bildir('Seans kaydedildi');
+    bildir(mesaj);
     haftaYukle();
   } catch (err) { $('#seans-hata').textContent = err.message; }
 });
@@ -223,8 +244,9 @@ function danisanCiz() {
   $('#danisan-liste').innerHTML = liste.map((d) => `<tr>
     <td>${esc(d.ad)}</td><td>${esc(d.telefon)}</td><td>${para(d.varsayilan_ucret)}</td>
     <td>${esc(d.notlar)}</td><td>${d.aktif ? 'Aktif' : 'Pasif'}</td>
-    <td><button class="ikincil" data-duzenle="${d.id}">Düzenle</button></td></tr>`).join('')
+    <td><button class="ikincil" data-hesap="${d.id}">Hesap</button> <button class="ikincil" data-duzenle="${d.id}">Düzenle</button></td></tr>`).join('')
     || '<tr><td colspan="6" class="ipucu">Kayıtlı danışan yok.</td></tr>';
+  $$('[data-hesap]').forEach((b) => b.addEventListener('click', () => hesapAc(Number(b.dataset.hesap))));
   $$('[data-duzenle]').forEach((b) => b.addEventListener('click', () => danisanFormAc(state.danisanlar.find((d) => d.id === Number(b.dataset.duzenle)))));
 }
 $('#danisan-ara').addEventListener('input', danisanCiz);
@@ -263,8 +285,9 @@ async function raporGetir() {
     state.rapor = r.satirlar.map((x) => ({ ...x, etiket: donemEtiket(r.grup, x.donem) }));
     $('#rapor-liste').innerHTML = state.rapor.map((x) => `<tr>
       <td>${esc(x.etiket)}</td><td>${esc(x.kullanici_ad)}</td><td class="sayi">${x.seans_sayisi}</td><td class="sayi">${x.tamamlanan}</td>
-      <td class="sayi">${para(x.toplam_ucret)}</td><td class="sayi">${para(x.tahsil_edilen)}</td><td class="sayi">${para(x.bekleyen)}</td></tr>`).join('')
-      || '<tr><td colspan="7" class="ipucu">Bu aralıkta seans yok.</td></tr>';
+      <td class="sayi">${para(x.toplam_ucret)}</td><td class="sayi">${para(x.tahsil_edilen)}</td><td class="sayi">${para(x.bekleyen)}</td>
+      <td class="sayi">${para(x.komisyon)}${x.komisyon_orani ? ` <small>(%${x.komisyon_orani})</small>` : ''}</td><td class="sayi">${para(x.net)}</td></tr>`).join('')
+      || '<tr><td colspan="9" class="ipucu">Bu aralıkta seans yok.</td></tr>';
 
     const kisi = {};
     for (const x of state.rapor) {
@@ -279,14 +302,154 @@ async function raporGetir() {
 }
 $('#rapor-getir').addEventListener('click', raporGetir);
 $('#rapor-grup').addEventListener('change', raporGetir);
-$('#rapor-csv').addEventListener('click', () => {
-  const satirlar = [['Dönem', 'Seansı alan', 'Seans', 'Tamamlanan', 'Toplam ücret', 'Tahsil edilen', 'Bekleyen'],
-    ...state.rapor.map((x) => [x.etiket, x.kullanici_ad, x.seans_sayisi, x.tamamlanan, x.toplam_ucret, x.tahsil_edilen, x.bekleyen])];
+function csvIndir(dosya, satirlar) {
   const csv = '﻿' + satirlar.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\n');
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-  a.download = `rapor-${$('#rapor-bas').value}_${$('#rapor-bit').value}.csv`;
+  a.download = dosya;
   a.click();
+}
+$('#rapor-csv').addEventListener('click', () => {
+  csvIndir(`seans-raporu-${$('#rapor-bas').value}_${$('#rapor-bit').value}.csv`, [
+    ['Dönem', 'Seansı alan', 'Seans', 'Tamamlanan', 'Toplam ücret', 'Tahsil edilen', 'Bekleyen', 'Komisyon', 'Net'],
+    ...state.rapor.map((x) => [x.etiket, x.kullanici_ad, x.seans_sayisi, x.tamamlanan, x.toplam_ucret, x.tahsil_edilen, x.bekleyen, x.komisyon, x.net])]);
+});
+
+// ---------- Danışan hesabı ----------
+async function hesapAc(id) {
+  try {
+    const h = await api(`/api/danisanlar/${id}/hesap`);
+    $('#hesap-baslik').textContent = `${h.danisan.ad} — hesap`;
+    $('#hesap-ozet').innerHTML =
+      `<div class="kutu"><small>Toplam ücret</small><b>${para(h.ozet.toplam)}</b><small>${h.ozet.seans_sayisi} seans</small></div>` +
+      `<div class="kutu"><small>Ödenen</small><b>${para(h.ozet.odenen)}</b></div>` +
+      `<div class="kutu"><small>Kalan borç</small><b class="${h.ozet.borc > 0 ? 'negatif' : ''}">${para(h.ozet.borc)}</b></div>`;
+    $('#hesap-liste').innerHTML = h.seanslar.map((s) => `<tr>
+      <td>${trTarih(s.tarih, { day: 'numeric', month: 'short', year: 'numeric' })} ${esc(s.saat || '')}</td><td>${esc(s.kullanici_ad)}</td>
+      <td>${DURUM[s.durum]}</td><td class="sayi">${para(s.ucret)}</td>
+      <td>${s.durum === 'iptal' ? '—' : `<span class="rozet ${s.odendi ? 'odendi' : 'bekliyor'}">${s.odendi ? 'Ödendi' : 'Bekliyor'}</span>`}</td></tr>`).join('')
+      || '<tr><td colspan="5" class="ipucu">Bu danışana ait seans yok.</td></tr>';
+    $('#hesap-dialog').showModal();
+  } catch (err) { bildir(err.message); }
+}
+
+// ---------- Giderler ----------
+const giderForm = $('#gider-form');
+const sahipAdi = (g) => g.kullanici_ad || 'Ortak';
+
+async function giderGetir() {
+  try {
+    const f = $('#gider-filtre').value;
+    state.giderler = await api(`/api/giderler?baslangic=${$('#gider-bas').value}&bitis=${$('#gider-bit').value}${f ? `&user_id=${f}` : ''}`);
+    $('#gider-liste').innerHTML = state.giderler.map((g) => `<tr>
+      <td>${trTarih(g.tarih, { day: 'numeric', month: 'short', year: 'numeric' })}</td><td>${esc(state.kategoriler[g.kategori] || g.kategori)}</td>
+      <td>${esc(g.aciklama)}</td><td>${esc(sahipAdi(g))}</td><td class="sayi">${para(g.tutar)}</td>
+      <td><button class="ikincil" data-gider="${g.id}">Düzenle</button></td></tr>`).join('')
+      || '<tr><td colspan="6" class="ipucu">Bu aralıkta gider yok.</td></tr>';
+    $$('[data-gider]').forEach((b) => b.addEventListener('click', () => giderFormAc(state.giderler.find((g) => g.id === Number(b.dataset.gider)))));
+
+    const vergi = state.giderler.filter((g) => state.vergiKategorileri.includes(g.kategori)).reduce((a, g) => a + g.tutar, 0);
+    const toplam = state.giderler.reduce((a, g) => a + g.tutar, 0);
+    $('#gider-ozet').innerHTML =
+      `<div class="kutu"><small>Toplam gider</small><b>${para(toplam)}</b><small>${state.giderler.length} kayıt</small></div>` +
+      `<div class="kutu"><small>Vergi giderleri</small><b>${para(vergi)}</b><small>stopaj, KDV, gelir vergisi…</small></div>` +
+      `<div class="kutu"><small>Diğer giderler</small><b>${para(toplam - vergi)}</b></div>`;
+  } catch (err) { bildir(err.message); }
+}
+$('#gider-getir').addEventListener('click', giderGetir);
+$('#gider-filtre').addEventListener('change', giderGetir);
+$('#gider-ekle').addEventListener('click', () => giderFormAc(null));
+
+function giderFormAc(g) {
+  const f = giderForm;
+  f.id.value = g?.id || '';
+  f.tarih.value = g?.tarih || iso(new Date());
+  f.kategori.value = g?.kategori || 'stopaj';
+  f.user_id.value = g ? (g.user_id ?? 'ortak') : (state.ben.role === 'admin' ? 'ortak' : state.ben.id);
+  f.tutar.value = g?.tutar ?? '';
+  f.aciklama.value = g?.aciklama || '';
+  f.matrah.value = ''; f.oran.value = varsayilanOran(f.kategori.value);
+  $('#gider-baslik').textContent = g ? 'Gideri düzenle' : 'Yeni gider';
+  $('#gider-sil').classList.toggle('hidden', !g);
+  $('#gider-hata').textContent = '';
+  $('#gider-dialog').showModal();
+}
+
+// Matrah × oran ile tutar hesaplama (ör. kira stopajı %20)
+const VARSAYILAN_ORAN = { stopaj: 20, kdv: 20, damga: 0.948 };
+const varsayilanOran = (k) => VARSAYILAN_ORAN[k] ?? '';
+giderForm.kategori.addEventListener('change', () => { giderForm.oran.value = varsayilanOran(giderForm.kategori.value); oranHesapla(); });
+function oranHesapla() {
+  const m = Number(giderForm.matrah.value), o = Number(giderForm.oran.value);
+  if (m > 0 && o > 0) giderForm.tutar.value = (Math.round(m * o) / 100).toFixed(2);
+}
+giderForm.matrah.addEventListener('input', oranHesapla);
+giderForm.oran.addEventListener('input', oranHesapla);
+
+giderForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = giderForm;
+  const body = { tarih: f.tarih.value, kategori: f.kategori.value, tutar: Number(f.tutar.value), aciklama: f.aciklama.value, user_id: f.user_id.value };
+  try {
+    if (f.id.value) await api(`/api/giderler/${f.id.value}`, { method: 'PUT', body });
+    else await api('/api/giderler', { method: 'POST', body });
+    $('#gider-dialog').close(); bildir('Gider kaydedildi'); giderGetir();
+  } catch (err) { $('#gider-hata').textContent = err.message; }
+});
+$('#gider-sil').addEventListener('click', async () => {
+  if (!confirm('Bu gider silinsin mi?')) return;
+  try {
+    await api(`/api/giderler/${giderForm.id.value}`, { method: 'DELETE' });
+    $('#gider-dialog').close(); bildir('Gider silindi'); giderGetir();
+  } catch (err) { $('#gider-hata').textContent = err.message; }
+});
+
+// ---------- Gelir-gider raporu ----------
+async function ggGetir() {
+  try {
+    const f = $('#gg-filtre').value;
+    const r = await api(`/api/gelir-gider?grup=${$('#gg-grup').value}&baslangic=${$('#gg-bas').value}&bitis=${$('#gg-bit').value}${f ? `&user_id=${f}` : ''}`);
+    state.gg = r.satirlar.map((x) => ({ ...x, etiket: donemEtiket(r.grup, x.donem) }));
+    const netHucre = (n) => `<td class="sayi ${n < 0 ? 'negatif' : ''}"><b>${para(n)}</b></td>`;
+    $('#gg-liste').innerHTML = state.gg.map((x) => `<tr>
+      <td>${esc(x.etiket)}</td><td class="sayi">${para(x.gelir)}</td><td class="sayi">${para(x.tahsilat)}</td>
+      <td class="sayi">${para(x.vergi)}</td><td class="sayi">${para(x.diger_gider)}</td><td class="sayi">${para(x.komisyon)}</td>
+      <td class="sayi">${para(x.toplam_gider)}</td>${netHucre(x.net)}</tr>`).join('')
+      || '<tr><td colspan="8" class="ipucu">Bu aralıkta kayıt yok.</td></tr>';
+
+    const t = state.gg.reduce((a, x) => {
+      for (const k of ['gelir', 'tahsilat', 'vergi', 'diger_gider', 'komisyon', 'toplam_gider', 'net']) a[k] += x[k];
+      return a;
+    }, { gelir: 0, tahsilat: 0, vergi: 0, diger_gider: 0, komisyon: 0, toplam_gider: 0, net: 0 });
+    $('#gg-toplam').innerHTML =
+      `<div class="kutu"><small>Toplam gelir</small><b>${para(t.gelir)}</b><small>tahsil edilen ${para(t.tahsilat)}</small></div>` +
+      `<div class="kutu"><small>Toplam gider</small><b>${para(t.toplam_gider)}</b><small>vergi ${para(t.vergi)}</small></div>` +
+      `<div class="kutu"><small>Net kâr</small><b class="${t.net < 0 ? 'negatif' : ''}">${para(t.net)}</b></div>`;
+  } catch (err) { bildir(err.message); }
+}
+$('#gg-getir').addEventListener('click', ggGetir);
+$('#gg-grup').addEventListener('change', ggGetir);
+$('#gg-filtre').addEventListener('change', ggGetir);
+$('#gg-csv').addEventListener('click', () => {
+  csvIndir(`gelir-gider-${$('#gg-bas').value}_${$('#gg-bit').value}.csv`, [
+    ['Dönem', 'Gelir', 'Tahsilat', 'Vergi giderleri', 'Diğer giderler', 'Komisyon', 'Toplam gider', 'Net'],
+    ...state.gg.map((x) => [x.etiket, x.gelir, x.tahsilat, x.vergi, x.diger_gider, x.komisyon, x.toplam_gider, x.net])]);
+});
+
+// ---------- Komisyon oranları ----------
+function komisyonAlanlariCiz(terapistler) {
+  $('#komisyon-alanlar').innerHTML = terapistler.map((u) =>
+    `<label>${esc(u.display_name)} (%) <input type="number" min="0" max="100" step="0.01" data-komisyon="${u.id}" value="${u.komisyon_orani || 0}"></label>`).join('');
+}
+$('#komisyon-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    for (const inp of $$('[data-komisyon]')) {
+      await api(`/api/kullanicilar/${inp.dataset.komisyon}/komisyon`, { method: 'PUT', body: { komisyon_orani: Number(inp.value) } });
+    }
+    state.kullanicilar = await api('/api/kullanicilar');
+    bildir('Oranlar kaydedildi');
+  } catch (err) { bildir(err.message); }
 });
 
 // ---------- Ayarlar ----------

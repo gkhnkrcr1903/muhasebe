@@ -67,6 +67,19 @@ async function migrate() {
       aciklama TEXT NOT NULL,
       zaman TEXT NOT NULL DEFAULT ${SIMDI}
     )`,
+    // Seans gelirinden komisyon / kâr payı olarak ayrılan yüzde
+    'ALTER TABLE users ADD COLUMN IF NOT EXISTS komisyon_orani DOUBLE PRECISION NOT NULL DEFAULT 0',
+    `CREATE TABLE IF NOT EXISTS giderler (
+      id SERIAL PRIMARY KEY,
+      tarih TEXT NOT NULL,
+      kategori TEXT NOT NULL,
+      aciklama TEXT,
+      tutar DOUBLE PRECISION NOT NULL DEFAULT 0,
+      user_id INTEGER REFERENCES users(id),   -- NULL = ortak gider
+      olusturan_id INTEGER NOT NULL REFERENCES users(id),
+      olusturma TEXT NOT NULL DEFAULT ${SIMDI}
+    )`,
+    'CREATE INDEX IF NOT EXISTS idx_gider_tarih ON giderler(tarih)',
   ];
   for (const sql of ddl) await client.query(sql);
 }
