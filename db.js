@@ -80,6 +80,9 @@ async function migrate() {
       olusturma TEXT NOT NULL DEFAULT ${SIMDI}
     )`,
     'CREATE INDEX IF NOT EXISTS idx_gider_tarih ON giderler(tarih)',
+    // Tahsilat esaslı gelir için ödemenin alındığı gün
+    'ALTER TABLE seanslar ADD COLUMN IF NOT EXISTS odeme_tarihi TEXT',
+    'UPDATE seanslar SET odeme_tarihi = tarih WHERE odendi = 1 AND odeme_tarihi IS NULL',
   ];
   for (const sql of ddl) await client.query(sql);
 }

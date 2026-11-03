@@ -37,4 +37,4 @@ Uygulama http://localhost:3000 adresinde açılır.
 2. Render'da **New → Blueprint** ile bu repoyu seçin (`render.yaml` okunur).
 3. `DATABASE_URL` alanına Neon adresini, şifre alanlarına kullanıcı şifrelerini girin.
 
-Not: Render free planında servis 15 dk kullanılmazsa uyur; ilk açılış ~30-50 sn sürebilir. Veriler Neon'da kalıcıdır.
+Not: Render free planında servis 15 dk istek gelmezse uyur. Bunu önlemek için `.github/workflows/uyanik-tut.yml` 10 dakikada bir `/saglik` adresine istek atar (adres farklıysa repo ayarlarında `APP_URL` değişkeni tanımlayın). Veriler Neon'da kalıcıdır.

@@ -2,152 +2,191 @@
 <html lang="tr">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#14213d">
   <title>Seans Muhasebe</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <!-- Giriş -->
   <section id="giris-ekrani" class="giris hidden">
-    <form id="giris-form" class="kart">
-      <h1>Seans Muhasebe</h1>
-      <label>Kullanıcı adı <input name="username" autocomplete="username" required></label>
-      <label>Şifre <input name="password" type="password" autocomplete="current-password" required></label>
-      <button type="submit">Giriş yap</button>
-      <p class="hata" id="giris-hata"></p>
-    </form>
+    <div class="giris-panel">
+      <div class="marka buyuk"><span class="logo">SM</span><div><b>Seans Muhasebe</b><small>Defne Çocuk ve Aile · Elda Psikoloji</small></div></div>
+      <form id="giris-form" class="kart">
+        <h2>Giriş yap</h2>
+        <label>Kullanıcı adı <input name="username" autocomplete="username" autocapitalize="none" required></label>
+        <label>Şifre <input name="password" type="password" autocomplete="current-password" required></label>
+        <button type="submit" class="tam">Giriş yap</button>
+        <p class="hata" id="giris-hata"></p>
+      </form>
+    </div>
   </section>
 
   <!-- Uygulama -->
   <div id="uygulama" class="hidden">
-    <header>
-      <strong>Seans Muhasebe</strong>
+    <aside id="kenar" class="kenar">
+      <div class="marka"><span class="logo">SM</span><div><b>Seans Muhasebe</b><small>Yönetim paneli</small></div></div>
       <nav>
-        <button data-sekme="plan" class="aktif">Haftalık Plan</button>
-        <button data-sekme="danisanlar">Danışanlar</button>
-        <button data-sekme="rapor">Seans Raporu</button>
-        <button data-sekme="giderler">Giderler</button>
-        <button data-sekme="gelirgider">Gelir-Gider</button>
-        <button data-sekme="ayarlar">Ayarlar</button>
+        <small class="nav-baslik">Operasyon</small>
+        <button data-sekme="plan" class="aktif"><span class="ikon">▦</span> Haftalık Plan</button>
+        <button data-sekme="danisanlar"><span class="ikon">◉</span> Danışanlar</button>
+        <small class="nav-baslik">Finans</small>
+        <button data-sekme="rapor"><span class="ikon">▤</span> Seans Raporu</button>
+        <button data-sekme="giderler"><span class="ikon">⊖</span> Giderler</button>
+        <button data-sekme="gelirgider"><span class="ikon">⇅</span> Gelir-Gider</button>
+        <small class="nav-baslik">Hesap</small>
+        <button data-sekme="ayarlar"><span class="ikon">⚙</span> Ayarlar</button>
       </nav>
-      <span class="kullanici"><span id="ben-ad"></span> <button id="cikis" class="ikincil">Çıkış</button></span>
-    </header>
+      <div class="kenar-alt">
+        <div class="avatar" id="ben-avatar"></div>
+        <div class="kenar-kisi"><b id="ben-ad"></b><small id="ben-rol"></small></div>
+        <button id="cikis" class="ikincil kucuk">Çıkış</button>
+      </div>
+    </aside>
+    <div id="perde" class="perde"></div>
 
-    <main>
-      <!-- Haftalık plan -->
-      <section id="sekme-plan" class="sekme">
-        <div class="arac-cubugu">
-          <button id="hafta-onceki" class="ikincil">‹ Önceki</button>
-          <strong id="hafta-baslik"></strong>
-          <button id="hafta-sonraki" class="ikincil">Sonraki ›</button>
-          <button id="hafta-bugun" class="ikincil">Bu hafta</button>
-          <select id="plan-filtre" class="sadece-admin"><option value="">Herkes</option></select>
-          <span class="bosluk"></span>
-          <button id="seans-ekle">+ Seans ekle</button>
-        </div>
-        <div id="hafta-ozet" class="ozet"></div>
-        <div id="hafta-grid" class="hafta-grid"></div>
-      </section>
+    <div class="ana">
+      <header class="ust-bar">
+        <button id="menu-ac" class="menu-ac" aria-label="Menü">☰</button>
+        <h1 id="sayfa-baslik">Haftalık Plan</h1>
+      </header>
 
-      <!-- Danışanlar -->
-      <section id="sekme-danisanlar" class="sekme hidden">
-        <div class="arac-cubugu">
-          <input id="danisan-ara" placeholder="Danışan ara…">
-          <label class="satir"><input type="checkbox" id="danisan-pasif"> Pasifleri göster</label>
-          <span class="bosluk"></span>
-          <button id="danisan-ekle">+ Danışan ekle</button>
-        </div>
-        <table class="tablo">
-          <thead><tr><th>Ad</th><th>Telefon</th><th>Varsayılan ücret</th><th>Not</th><th>Durum</th><th></th></tr></thead>
-          <tbody id="danisan-liste"></tbody>
-        </table>
-      </section>
+      <main>
+        <!-- Haftalık plan -->
+        <section id="sekme-plan" class="sekme">
+          <div class="arac-cubugu">
+            <div class="grup-btn">
+              <button id="hafta-onceki" class="ikincil" aria-label="Önceki hafta">‹</button>
+              <button id="hafta-bugun" class="ikincil">Bu hafta</button>
+              <button id="hafta-sonraki" class="ikincil" aria-label="Sonraki hafta">›</button>
+            </div>
+            <strong id="hafta-baslik" class="hafta-baslik"></strong>
+            <span class="bosluk"></span>
+            <select id="plan-filtre" class="sadece-admin"><option value="">Herkes</option></select>
+            <button id="seans-ekle">+ Seans ekle</button>
+          </div>
+          <div id="hafta-ozet" class="ozet"></div>
+          <div id="hafta-grid" class="hafta-grid"></div>
+        </section>
 
-      <!-- Rapor -->
-      <section id="sekme-rapor" class="sekme hidden">
-        <div class="arac-cubugu">
-          <label>Gruplama
-            <select id="rapor-grup"><option value="hafta">Haftalık</option><option value="ay">Aylık</option></select>
-          </label>
-          <label>Başlangıç <input type="date" id="rapor-bas"></label>
-          <label>Bitiş <input type="date" id="rapor-bit"></label>
-          <button id="rapor-getir">Hesapla</button>
-          <button id="rapor-csv" class="ikincil">CSV indir</button>
-        </div>
-        <div id="rapor-toplam" class="ozet"></div>
-        <table class="tablo">
-          <thead><tr><th>Dönem</th><th>Seansı alan</th><th class="sayi">Seans</th><th class="sayi">Tamamlanan</th><th class="sayi">Toplam ücret</th><th class="sayi">Tahsil edilen</th><th class="sayi">Bekleyen</th><th class="sayi">Komisyon</th><th class="sayi">Net</th></tr></thead>
-          <tbody id="rapor-liste"></tbody>
-        </table>
-        <p class="ipucu">İptal edilen seanslar hesaplamaya dahil edilmez. Komisyon oranları Ayarlar sekmesinden belirlenir.</p>
-      </section>
+        <!-- Danışanlar -->
+        <section id="sekme-danisanlar" class="sekme hidden">
+          <div class="arac-cubugu">
+            <input id="danisan-ara" class="ara" placeholder="Danışan ara…">
+            <label class="satir"><input type="checkbox" id="danisan-pasif"> Pasifleri göster</label>
+            <span class="bosluk"></span>
+            <button id="danisan-ekle">+ Danışan ekle</button>
+          </div>
+          <div class="kart tablo-kart">
+            <table class="tablo">
+              <thead><tr><th>Ad</th><th>Telefon</th><th class="sayi">Varsayılan ücret</th><th>Not</th><th>Durum</th><th></th></tr></thead>
+              <tbody id="danisan-liste"></tbody>
+            </table>
+          </div>
+        </section>
 
-      <!-- Giderler -->
-      <section id="sekme-giderler" class="sekme hidden">
-        <div class="arac-cubugu">
-          <label>Başlangıç <input type="date" id="gider-bas"></label>
-          <label>Bitiş <input type="date" id="gider-bit"></label>
-          <label class="sadece-admin">Kime ait <select id="gider-filtre"></select></label>
-          <button id="gider-getir" class="ikincil">Listele</button>
-          <span class="bosluk"></span>
-          <button id="gider-ekle">+ Gider ekle</button>
-        </div>
-        <div id="gider-ozet" class="ozet"></div>
-        <table class="tablo">
-          <thead><tr><th>Tarih</th><th>Kategori</th><th>Açıklama</th><th>Kime ait</th><th class="sayi">Tutar</th><th></th></tr></thead>
-          <tbody id="gider-liste"></tbody>
-        </table>
-      </section>
+        <!-- Seans raporu -->
+        <section id="sekme-rapor" class="sekme hidden">
+          <div class="arac-cubugu filtre">
+            <label>Gruplama
+              <select id="rapor-grup"><option value="hafta">Haftalık</option><option value="ay">Aylık</option></select>
+            </label>
+            <label>Başlangıç <input type="date" id="rapor-bas"></label>
+            <label>Bitiş <input type="date" id="rapor-bit"></label>
+            <div class="filtre-btn">
+              <button id="rapor-getir">Hesapla</button>
+              <button id="rapor-csv" class="ikincil">CSV</button>
+            </div>
+          </div>
+          <div id="rapor-toplam" class="ozet"></div>
+          <div class="kart tablo-kart">
+            <table class="tablo">
+              <thead><tr><th>Dönem</th><th>Seansı alan</th><th class="sayi">Seans</th><th class="sayi">Tamamlanan</th><th class="sayi">Toplam ücret</th><th class="sayi">Tahsil edilen</th><th class="sayi">Bekleyen</th><th class="sayi">Komisyon</th><th class="sayi">Net</th></tr></thead>
+              <tbody id="rapor-liste"></tbody>
+            </table>
+          </div>
+          <p class="ipucu">Seanslar seans tarihine göre gruplanır; iptal edilenler dahil edilmez. Komisyon ve net, tahsil edilen tutar üzerinden hesaplanır.</p>
+        </section>
 
-      <!-- Gelir-gider -->
-      <section id="sekme-gelirgider" class="sekme hidden">
-        <div class="arac-cubugu">
-          <label>Gruplama
-            <select id="gg-grup"><option value="ay">Aylık</option><option value="hafta">Haftalık</option></select>
-          </label>
-          <label>Başlangıç <input type="date" id="gg-bas"></label>
-          <label>Bitiş <input type="date" id="gg-bit"></label>
-          <label class="sadece-admin">Kim için <select id="gg-filtre"></select></label>
-          <button id="gg-getir">Hesapla</button>
-          <button id="gg-csv" class="ikincil">CSV indir</button>
-        </div>
-        <div id="gg-toplam" class="ozet"></div>
-        <table class="tablo">
-          <thead><tr><th>Dönem</th><th class="sayi">Gelir</th><th class="sayi">Tahsilat</th><th class="sayi">Vergi giderleri</th><th class="sayi">Diğer giderler</th><th class="sayi">Komisyon</th><th class="sayi">Toplam gider</th><th class="sayi">Net</th></tr></thead>
-          <tbody id="gg-liste"></tbody>
-        </table>
-        <p class="ipucu">Gelir: iptal edilmeyen seansların ücreti (tahakkuk esası). Vergi giderleri: stopaj, KDV, gelir/geçici vergi, damga vergisi. "Herkes" seçiliyken ortak giderler de dahildir.</p>
-      </section>
+        <!-- Giderler -->
+        <section id="sekme-giderler" class="sekme hidden">
+          <div class="arac-cubugu filtre">
+            <label>Başlangıç <input type="date" id="gider-bas"></label>
+            <label>Bitiş <input type="date" id="gider-bit"></label>
+            <label class="sadece-admin">Kime ait <select id="gider-filtre"></select></label>
+            <div class="filtre-btn">
+              <button id="gider-getir" class="ikincil">Listele</button>
+              <button id="gider-ekle">+ Gider ekle</button>
+            </div>
+          </div>
+          <div id="gider-ozet" class="ozet"></div>
+          <div class="kart tablo-kart">
+            <table class="tablo">
+              <thead><tr><th>Tarih</th><th>Kategori</th><th>Açıklama</th><th>Kime ait</th><th class="sayi">Tutar</th><th></th></tr></thead>
+              <tbody id="gider-liste"></tbody>
+            </table>
+          </div>
+        </section>
 
-      <!-- Ayarlar -->
-      <section id="sekme-ayarlar" class="sekme hidden">
-        <form id="sifre-form" class="kart dar">
-          <h3>Şifremi değiştir</h3>
-          <label>Mevcut şifre <input type="password" name="eski" required></label>
-          <label>Yeni şifre <input type="password" name="yeni" minlength="6" required></label>
-          <button type="submit">Kaydet</button>
-        </form>
-        <div class="kart dar sadece-admin">
-          <h3>Kullanıcı şifresi sıfırla</h3>
-          <form id="sifirla-form">
-            <label>Kullanıcı <select name="id" id="sifirla-kullanici"></select></label>
-            <label>Yeni şifre <input type="password" name="yeni" minlength="6" required></label>
-            <button type="submit">Sıfırla</button>
-          </form>
-        </div>
-        <div class="kart dar sadece-admin">
-          <h3>Komisyon / kâr payı oranları</h3>
-          <p class="ipucu">Seans gelirinden ayrılan yüzde. Raporlarda gider olarak düşülür.</p>
-          <form id="komisyon-form"><div id="komisyon-alanlar"></div><button type="submit">Kaydet</button></form>
-        </div>
-      </section>
-    </main>
+        <!-- Gelir-gider -->
+        <section id="sekme-gelirgider" class="sekme hidden">
+          <div class="arac-cubugu filtre">
+            <label>Gruplama
+              <select id="gg-grup"><option value="ay">Aylık</option><option value="hafta">Haftalık</option></select>
+            </label>
+            <label>Başlangıç <input type="date" id="gg-bas"></label>
+            <label>Bitiş <input type="date" id="gg-bit"></label>
+            <label class="sadece-admin">Kim için <select id="gg-filtre"></select></label>
+            <div class="filtre-btn">
+              <button id="gg-getir">Hesapla</button>
+              <button id="gg-csv" class="ikincil">CSV</button>
+            </div>
+          </div>
+          <div id="gg-toplam" class="ozet"></div>
+          <div class="kart tablo-kart">
+            <table class="tablo">
+              <thead><tr><th>Dönem</th><th class="sayi">Gelir (tahsilat)</th><th class="sayi">Vergi giderleri</th><th class="sayi">Diğer giderler</th><th class="sayi">Komisyon</th><th class="sayi">Toplam gider</th><th class="sayi">Net</th><th class="sayi">Bekleyen alacak</th></tr></thead>
+              <tbody id="gg-liste"></tbody>
+            </table>
+          </div>
+          <p class="ipucu">Gelir tahsilat esasına göredir: yalnızca ödemesi alınan seanslar, ödeme tarihine göre sayılır. Bekleyen alacak bilgi amaçlıdır ve nete dahil edilmez. Vergi giderleri: stopaj, KDV, gelir/geçici vergi, damga vergisi. "Herkes" seçiliyken ortak giderler de dahildir.</p>
+        </section>
+
+        <!-- Ayarlar -->
+        <section id="sekme-ayarlar" class="sekme hidden">
+          <div class="ayar-grid">
+            <form id="sifre-form" class="kart">
+              <h3>Şifremi değiştir</h3>
+              <label>Mevcut şifre <input type="password" name="eski" required></label>
+              <label>Yeni şifre <input type="password" name="yeni" minlength="6" required></label>
+              <button type="submit">Kaydet</button>
+            </form>
+            <div class="kart sadece-admin">
+              <h3>Kullanıcı şifresi sıfırla</h3>
+              <form id="sifirla-form">
+                <label>Kullanıcı <select name="id" id="sifirla-kullanici"></select></label>
+                <label>Yeni şifre <input type="password" name="yeni" minlength="6" required></label>
+                <button type="submit">Sıfırla</button>
+              </form>
+            </div>
+            <div class="kart sadece-admin">
+              <h3>Komisyon / kâr payı oranları</h3>
+              <p class="ipucu">Tahsil edilen seans gelirinden ayrılan yüzde. Raporlarda gider olarak düşülür.</p>
+              <form id="komisyon-form"><div id="komisyon-alanlar"></div><button type="submit">Kaydet</button></form>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
   </div>
 
   <!-- Seans formu -->
   <dialog id="seans-dialog">
     <form id="seans-form" method="dialog">
-      <h3 id="seans-baslik">Seans</h3>
+      <div class="dialog-bas"><h3 id="seans-baslik">Seans</h3><button type="button" class="kapat" data-kapat aria-label="Kapat">×</button></div>
       <input type="hidden" name="id">
       <label>Danışan <select name="danisan_id" required></select></label>
       <label>Seansı alacak <select name="user_id" required></select></label>
@@ -156,7 +195,7 @@
         <label>Saat <input type="time" name="saat"></label>
       </div>
       <div class="ikili">
-        <label>Ücret (₺) <input type="number" name="ucret" min="0" step="0.01"></label>
+        <label>Ücret (₺) <input type="number" name="ucret" min="0" step="0.01" inputmode="decimal"></label>
         <label>Durum
           <select name="durum">
             <option value="planlandi">Planlandı</option>
@@ -165,8 +204,11 @@
           </select>
         </label>
       </div>
-      <label class="satir"><input type="checkbox" name="odendi"> Ödeme alındı</label>
-      <label id="tekrar-alan">Tekrarla (sonraki haftalarda da aynı gün ve saatte)
+      <div class="ikili hizali">
+        <label class="satir"><input type="checkbox" name="odendi"> Ödeme alındı</label>
+        <label id="odeme-tarihi-alan">Ödeme tarihi <input type="date" name="odeme_tarihi"></label>
+      </div>
+      <label id="tekrar-alan">Tekrarla (sonraki haftalarda aynı gün ve saatte)
         <select name="tekrar">
           <option value="0">Tekrarlama</option>
           <option value="3">4 hafta (1 ay)</option>
@@ -190,11 +232,11 @@
   <!-- Danışan formu -->
   <dialog id="danisan-dialog">
     <form id="danisan-form" method="dialog">
-      <h3>Danışan</h3>
+      <div class="dialog-bas"><h3>Danışan</h3><button type="button" class="kapat" data-kapat aria-label="Kapat">×</button></div>
       <input type="hidden" name="id">
       <label>Ad soyad <input name="ad" required></label>
-      <label>Telefon <input name="telefon"></label>
-      <label>Varsayılan seans ücreti (₺) <input type="number" name="varsayilan_ucret" min="0" step="0.01"></label>
+      <label>Telefon <input name="telefon" type="tel" inputmode="tel"></label>
+      <label>Varsayılan seans ücreti (₺) <input type="number" name="varsayilan_ucret" min="0" step="0.01" inputmode="decimal"></label>
       <label>Not <textarea name="notlar" rows="2"></textarea></label>
       <label class="satir"><input type="checkbox" name="aktif" checked> Aktif</label>
       <p class="hata" id="danisan-hata"></p>
@@ -209,7 +251,7 @@
   <!-- Gider formu -->
   <dialog id="gider-dialog">
     <form id="gider-form" method="dialog">
-      <h3 id="gider-baslik">Gider</h3>
+      <div class="dialog-bas"><h3 id="gider-baslik">Gider</h3><button type="button" class="kapat" data-kapat aria-label="Kapat">×</button></div>
       <input type="hidden" name="id">
       <div class="ikili">
         <label>Tarih <input type="date" name="tarih" required></label>
@@ -217,10 +259,10 @@
       </div>
       <label class="sadece-admin">Kime ait <select name="user_id"></select></label>
       <div id="oran-hesap" class="ikili">
-        <label>Matrah (₺) <input type="number" name="matrah" min="0" step="0.01" placeholder="Brüt tutar"></label>
-        <label>Oran (%) <input type="number" name="oran" min="0" max="100" step="0.01"></label>
+        <label>Matrah (₺) <input type="number" name="matrah" min="0" step="0.01" inputmode="decimal" placeholder="Brüt tutar"></label>
+        <label>Oran (%) <input type="number" name="oran" min="0" max="100" step="0.01" inputmode="decimal"></label>
       </div>
-      <label>Tutar (₺) <input type="number" name="tutar" min="0.01" step="0.01" required></label>
+      <label>Tutar (₺) <input type="number" name="tutar" min="0.01" step="0.01" inputmode="decimal" required></label>
       <label>Açıklama <input name="aciklama" placeholder="Örn. Ekim kira stopajı"></label>
       <p class="hata" id="gider-hata"></p>
       <div class="butonlar">
@@ -235,7 +277,7 @@
   <!-- Danışan hesabı -->
   <dialog id="hesap-dialog" class="genis">
     <div class="dialog-icerik">
-      <h3 id="hesap-baslik">Danışan hesabı</h3>
+      <div class="dialog-bas"><h3 id="hesap-baslik">Danışan hesabı</h3><button type="button" class="kapat" data-kapat aria-label="Kapat">×</button></div>
       <div id="hesap-ozet" class="ozet"></div>
       <div class="tablo-kutu">
         <table class="tablo">
@@ -243,7 +285,6 @@
           <tbody id="hesap-liste"></tbody>
         </table>
       </div>
-      <div class="butonlar"><span class="bosluk"></span><button type="button" class="ikincil" data-kapat>Kapat</button></div>
     </div>
   </dialog>
 

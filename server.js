@@ -57,6 +57,11 @@ function adminOnly(req, res, next) {
 }
 const isAdmin = (req) => req.user.role === 'admin';
 
+// Uyanık tutma ping'i için; veritabanına dokunmaz (Neon uyuyabilsin diye)
+app.get('/saglik', (req, res) => res.type('text').send('ok'));
+
+const bugunIstanbul = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Istanbul' });
+
 // ---------- Giriş ----------
 app.post('/api/giris', h(async (req, res) => {
   const { username, password } = req.body || {};
@@ -169,6 +174,7 @@ async function validateSeans(req, s) {
   if (!DATE_RE.test(s.tarih || '')) return 'Geçerli bir tarih girin';
   if (s.saat && !TIME_RE.test(s.saat)) return 'Saat SS:DD biçiminde olmalı';
   if (!DURUMLAR.includes(s.durum || 'planlandi')) return 'Geçersiz durum';
+  if (s.odeme_tarihi && !DATE_RE.test(s.odeme_tarihi)) return 'Geçerli bir ödeme tarihi girin';
   if (!Number.isInteger(s.danisan_id) || !await db.get('SELECT 1 FROM danisanlar WHERE id = $1', [s.danisan_id])) return 'Danışan bulunamadı';
   if (!Number.isInteger(s.user_id) || !await db.get("SELECT 1 FROM users WHERE id = $1 AND role = 'user'", [s.user_id])) return 'Seansı alacak kişi geçersiz';
   if (!isAdmin(req) && s.user_id !== req.user.id) return 'Seansı yalnızca kendinize atayabilirsiniz';
@@ -196,6 +202,7 @@ app.post('/api/seanslar', h(async (req, res) => {
     odendi: b.odendi ? 1 : 0,
     notlar: b.notlar || null,
   };
+  data.odeme_tarihi = data.odendi ? (b.odeme_tarihi || bugunIstanbul()) : null;
   const err = await validateSeans(req, data);
   if (err) return res.status(400).json({ hata: err });
   // tekrar: aynı seansı sonraki N haftaya da ekle (en fazla 52)
@@ -206,9 +213,10 @@ app.post('/api/seanslar', h(async (req, res) => {
     // Tekrarlanan seanslar planlandı ve ödenmemiş olarak başlar
     const durum = i === 0 ? data.durum : 'planlandi';
     const odendi = i === 0 ? data.odendi : 0;
-    const { id } = await db.get(`INSERT INTO seanslar (danisan_id, user_id, tarih, saat, ucret, durum, odendi, notlar)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-      [data.danisan_id, data.user_id, tarih, data.saat, data.ucret, durum, odendi, data.notlar]);
+    const odemeTarihi = i === 0 ? data.odeme_tarihi : null;
+    const { id } = await db.get(`INSERT INTO seanslar (danisan_id, user_id, tarih, saat, ucret, durum, odendi, notlar, odeme_tarihi)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+      [data.danisan_id, data.user_id, tarih, data.saat, data.ucret, durum, odendi, data.notlar, odemeTarihi]);
     await logChange(id, req.user.id, i === 0 ? 'Seans oluşturuldu' : `Tekrarlayan seans olarak oluşturuldu (${i}. hafta)`);
     ilkId ??= id;
   }
@@ -236,10 +244,11 @@ app.put('/api/seanslar/:id', h(async (req, res) => {
     odendi: b.odendi !== undefined ? (b.odendi ? 1 : 0) : old.odendi,
     notlar: b.notlar !== undefined ? (b.notlar || null) : old.notlar,
   };
+  data.odeme_tarihi = data.odendi ? (b.odeme_tarihi || old.odeme_tarihi || bugunIstanbul()) : null;
   const err = await validateSeans(req, data);
   if (err) return res.status(400).json({ hata: err });
-  await db.run(`UPDATE seanslar SET danisan_id = $1, user_id = $2, tarih = $3, saat = $4, ucret = $5, durum = $6, odendi = $7, notlar = $8 WHERE id = $9`,
-    [data.danisan_id, data.user_id, data.tarih, data.saat, data.ucret, data.durum, data.odendi, data.notlar, id]);
+  await db.run(`UPDATE seanslar SET danisan_id = $1, user_id = $2, tarih = $3, saat = $4, ucret = $5, durum = $6, odendi = $7, notlar = $8, odeme_tarihi = $9 WHERE id = $10`,
+    [data.danisan_id, data.user_id, data.tarih, data.saat, data.ucret, data.durum, data.odendi, data.notlar, data.odeme_tarihi, id]);
 
   const fresh = await getSeans(id);
   const changes = [];
@@ -248,7 +257,8 @@ app.put('/api/seanslar/:id', h(async (req, res) => {
   if (old.danisan_id !== fresh.danisan_id) changes.push(`Danışan: ${old.danisan_ad} → ${fresh.danisan_ad}`);
   if (old.ucret !== fresh.ucret) changes.push(`Ücret: ${old.ucret} → ${fresh.ucret}`);
   if (old.durum !== fresh.durum) changes.push(`Durum: ${DURUM_ETIKET[old.durum]} → ${DURUM_ETIKET[fresh.durum]}`);
-  if (old.odendi !== fresh.odendi) changes.push(fresh.odendi ? 'Ödeme alındı' : 'Ödeme geri alındı');
+  if (old.odendi !== fresh.odendi) changes.push(fresh.odendi ? `Ödeme alındı (${fresh.odeme_tarihi})` : 'Ödeme geri alındı');
+  else if (fresh.odendi && old.odeme_tarihi !== fresh.odeme_tarihi) changes.push(`Ödeme tarihi: ${old.odeme_tarihi} → ${fresh.odeme_tarihi}`);
   if (changes.length) await logChange(id, req.user.id, changes.join('; '));
   res.json(fresh);
 }));
@@ -292,8 +302,9 @@ app.get('/api/rapor', h(async (req, res) => {
     ${where}
     GROUP BY donem, s.user_id, u.display_name, u.id ORDER BY donem DESC, u.id`, params);
   for (const r of rows) {
-    r.komisyon = Math.round(r.toplam_ucret * r.komisyon_orani) / 100;
-    r.net = r.toplam_ucret - r.komisyon;
+    // Tahsilat esası: komisyon ve net, tahsil edilen tutar üzerinden
+    r.komisyon = Math.round(r.tahsil_edilen * r.komisyon_orani) / 100;
+    r.net = r.tahsil_edilen - r.komisyon;
   }
   res.json({ grup, satirlar: rows });
 }));
@@ -383,18 +394,31 @@ app.get('/api/gelir-gider', h(async (req, res) => {
   if (!DATE_RE.test(baslangic || '') || !DATE_RE.test(bitis || '')) return res.status(400).json({ hata: 'Tarih aralığı gerekli' });
   const donem = (col) => grup === 'ay' ? `substr(${col}, 1, 7)` : `to_char(date_trunc('week', ${col}::date), 'YYYY-MM-DD')`;
 
-  // Gelir: iptal edilmeyen seanslar (ortak filtre seçiliyse ortak gelir olmadığından boş kalır)
+  // Kullanıcı filtresi (ortak filtre seçiliyse ortak gelir olmadığından boş kalır)
+  const seansFiltre = (params) => {
+    if (!isAdmin(req)) { params.push(req.user.id); return ` AND s.user_id = $${params.length}`; }
+    if (req.query.user_id === 'ortak') return ' AND false';
+    if (req.query.user_id) { params.push(Number(req.query.user_id)); return ` AND s.user_id = $${params.length}`; }
+    return '';
+  };
+
+  // Gelir (tahsilat esası): ödemesi alınan seanslar, ödeme tarihine göre
   const sp = [baslangic, bitis];
-  let sWhere = "WHERE s.tarih BETWEEN $1 AND $2 AND s.durum != 'iptal'";
-  if (!isAdmin(req)) { sp.push(req.user.id); sWhere += ` AND s.user_id = $${sp.length}`; }
-  else if (req.query.user_id === 'ortak') sWhere += ' AND false';
-  else if (req.query.user_id) { sp.push(Number(req.query.user_id)); sWhere += ` AND s.user_id = $${sp.length}`; }
   const gelirler = await db.all(`
-    SELECT ${donem('s.tarih')} AS donem,
+    SELECT ${donem('s.odeme_tarihi')} AS donem,
       SUM(s.ucret) AS gelir,
-      SUM(CASE WHEN s.odendi = 1 THEN s.ucret ELSE 0 END) AS tahsilat,
       SUM(s.ucret * u.komisyon_orani / 100) AS komisyon
-    FROM seanslar s JOIN users u ON u.id = s.user_id ${sWhere} GROUP BY 1`, sp);
+    FROM seanslar s JOIN users u ON u.id = s.user_id
+    WHERE s.odendi = 1 AND s.durum != 'iptal' AND s.odeme_tarihi BETWEEN $1 AND $2 ${seansFiltre(sp)}
+    GROUP BY 1`, sp);
+
+  // Bilgi amaçlı: seansı yapılmış/planlanmış ama henüz tahsil edilmemiş tutar (seans tarihine göre)
+  const ap = [baslangic, bitis];
+  const alacaklar = await db.all(`
+    SELECT ${donem('s.tarih')} AS donem, SUM(s.ucret) AS alacak
+    FROM seanslar s
+    WHERE s.odendi = 0 AND s.durum != 'iptal' AND s.tarih BETWEEN $1 AND $2 ${seansFiltre(ap)}
+    GROUP BY 1`, ap);
 
   const gp = [baslangic, bitis];
   const gWhere = 'WHERE g.tarih BETWEEN $1 AND $2' + giderFiltre(req, gp);
@@ -403,8 +427,9 @@ app.get('/api/gelir-gider', h(async (req, res) => {
     FROM giderler g ${gWhere} GROUP BY 1, 2`, gp);
 
   const donemler = {};
-  const satir = (d) => (donemler[d] ||= { donem: d, gelir: 0, tahsilat: 0, komisyon: 0, vergi: 0, diger_gider: 0, kategoriler: {} });
-  for (const g of gelirler) Object.assign(satir(g.donem), { gelir: g.gelir, tahsilat: g.tahsilat, komisyon: Math.round(g.komisyon * 100) / 100 });
+  const satir = (d) => (donemler[d] ||= { donem: d, gelir: 0, alacak: 0, komisyon: 0, vergi: 0, diger_gider: 0, kategoriler: {} });
+  for (const g of gelirler) Object.assign(satir(g.donem), { gelir: g.gelir, komisyon: Math.round(g.komisyon * 100) / 100 });
+  for (const a of alacaklar) satir(a.donem).alacak = a.alacak;
   for (const g of giderler) {
     const s = satir(g.donem);
     s.kategoriler[g.kategori] = g.tutar;

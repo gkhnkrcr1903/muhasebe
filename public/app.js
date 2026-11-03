@@ -61,6 +61,8 @@ async function baslat() {
   $('#giris-ekrani').classList.add('hidden');
   $('#uygulama').classList.remove('hidden');
   $('#ben-ad').textContent = state.ben.display_name;
+  $('#ben-rol').textContent = state.ben.role === 'admin' ? 'Yönetici' : 'Kullanıcı';
+  $('#ben-avatar').textContent = state.ben.display_name.split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toLocaleUpperCase('tr');
   const admin = state.ben.role === 'admin';
   $$('.sadece-admin').forEach((el) => el.classList.toggle('hidden', !admin));
 
@@ -91,8 +93,14 @@ async function baslat() {
 }
 
 // ---------- Sekmeler ----------
-$$('header nav button').forEach((b) => b.addEventListener('click', () => {
-  $$('header nav button').forEach((x) => x.classList.toggle('aktif', x === b));
+$('#menu-ac').addEventListener('click', () => document.body.classList.add('menu-acik'));
+$('#perde').addEventListener('click', () => document.body.classList.remove('menu-acik'));
+
+$$('nav [data-sekme]').forEach((b) => b.addEventListener('click', () => {
+  $$('nav [data-sekme]').forEach((x) => x.classList.toggle('aktif', x === b));
+  document.body.classList.remove('menu-acik');
+  $('#sayfa-baslik').textContent = b.textContent.replace(/^\W+/, '').trim();
+  window.scrollTo(0, 0);
   $$('.sekme').forEach((s) => s.classList.add('hidden'));
   $(`#sekme-${b.dataset.sekme}`).classList.remove('hidden');
   if (b.dataset.sekme === 'rapor') raporGetir();
@@ -125,7 +133,7 @@ function haftaCiz() {
     html += `<div class="gun ${gun === bugun ? 'bugun' : ''}">
       <div class="gun-bas"><span><b>${GUNLER[i]}</b> ${trTarih(gun, { day: 'numeric', month: 'short' })}</span>
         <button class="ikincil" data-yeni="${gun}" title="Bu güne seans ekle">+</button></div>
-      <div class="gun-icerik">${liste.map(seansKarti).join('')}</div></div>`;
+      <div class="gun-icerik">${liste.map(seansKarti).join('') || '<div class="gun-bos">Seans yok</div>'}</div></div>`;
   }
   $('#hafta-grid').innerHTML = html;
   $$('[data-yeni]').forEach((b) => b.addEventListener('click', () => seansFormAc(null, b.dataset.yeni)));
@@ -179,6 +187,8 @@ async function seansFormAc(seans, tarih) {
   f.ucret.value = seans?.ucret ?? '';
   f.durum.value = seans?.durum || 'planlandi';
   f.odendi.checked = !!seans?.odendi;
+  f.odeme_tarihi.value = seans?.odeme_tarihi || iso(new Date());
+  odemeAlaniGuncelle();
   f.notlar.value = seans?.notlar || '';
   f.tekrar.value = '0';
   $('#tekrar-alan').classList.toggle('hidden', !!seans);
@@ -197,6 +207,15 @@ async function seansFormAc(seans, tarih) {
   $('#seans-dialog').showModal();
 }
 
+// Ödeme tarihi yalnızca ödeme alındıysa görünür; gelir bu tarihe göre sayılır
+function odemeAlaniGuncelle() {
+  $('#odeme-tarihi-alan').classList.toggle('hidden', !seansForm.odendi.checked);
+}
+seansForm.odendi.addEventListener('change', () => {
+  if (seansForm.odendi.checked && !seansForm.odeme_tarihi.value) seansForm.odeme_tarihi.value = iso(new Date());
+  odemeAlaniGuncelle();
+});
+
 // Danışan seçilince varsayılan ücreti öner
 seansForm.danisan_id.addEventListener('change', () => {
   const d = state.danisanlar.find((x) => x.id === Number(seansForm.danisan_id.value));
@@ -210,6 +229,7 @@ seansForm.addEventListener('submit', async (e) => {
     danisan_id: Number(f.danisan_id.value), user_id: Number(f.user_id.value),
     tarih: f.tarih.value, saat: f.saat.value, ucret: Number(f.ucret.value) || 0,
     durum: f.durum.value, odendi: f.odendi.checked, notlar: f.notlar.value,
+    odeme_tarihi: f.odendi.checked ? f.odeme_tarihi.value : null,
   };
   try {
     let mesaj = 'Seans kaydedildi';
@@ -412,17 +432,17 @@ async function ggGetir() {
     state.gg = r.satirlar.map((x) => ({ ...x, etiket: donemEtiket(r.grup, x.donem) }));
     const netHucre = (n) => `<td class="sayi ${n < 0 ? 'negatif' : ''}"><b>${para(n)}</b></td>`;
     $('#gg-liste').innerHTML = state.gg.map((x) => `<tr>
-      <td>${esc(x.etiket)}</td><td class="sayi">${para(x.gelir)}</td><td class="sayi">${para(x.tahsilat)}</td>
+      <td>${esc(x.etiket)}</td><td class="sayi">${para(x.gelir)}</td>
       <td class="sayi">${para(x.vergi)}</td><td class="sayi">${para(x.diger_gider)}</td><td class="sayi">${para(x.komisyon)}</td>
-      <td class="sayi">${para(x.toplam_gider)}</td>${netHucre(x.net)}</tr>`).join('')
+      <td class="sayi">${para(x.toplam_gider)}</td>${netHucre(x.net)}<td class="sayi">${para(x.alacak)}</td></tr>`).join('')
       || '<tr><td colspan="8" class="ipucu">Bu aralıkta kayıt yok.</td></tr>';
 
     const t = state.gg.reduce((a, x) => {
-      for (const k of ['gelir', 'tahsilat', 'vergi', 'diger_gider', 'komisyon', 'toplam_gider', 'net']) a[k] += x[k];
+      for (const k of ['gelir', 'alacak', 'vergi', 'diger_gider', 'komisyon', 'toplam_gider', 'net']) a[k] += x[k];
       return a;
-    }, { gelir: 0, tahsilat: 0, vergi: 0, diger_gider: 0, komisyon: 0, toplam_gider: 0, net: 0 });
+    }, { gelir: 0, alacak: 0, vergi: 0, diger_gider: 0, komisyon: 0, toplam_gider: 0, net: 0 });
     $('#gg-toplam').innerHTML =
-      `<div class="kutu"><small>Toplam gelir</small><b>${para(t.gelir)}</b><small>tahsil edilen ${para(t.tahsilat)}</small></div>` +
+      `<div class="kutu"><small>Gelir (tahsilat)</small><b>${para(t.gelir)}</b><small>bekleyen alacak ${para(t.alacak)}</small></div>` +
       `<div class="kutu"><small>Toplam gider</small><b>${para(t.toplam_gider)}</b><small>vergi ${para(t.vergi)}</small></div>` +
       `<div class="kutu"><small>Net kâr</small><b class="${t.net < 0 ? 'negatif' : ''}">${para(t.net)}</b></div>`;
   } catch (err) { bildir(err.message); }
@@ -432,8 +452,8 @@ $('#gg-grup').addEventListener('change', ggGetir);
 $('#gg-filtre').addEventListener('change', ggGetir);
 $('#gg-csv').addEventListener('click', () => {
   csvIndir(`gelir-gider-${$('#gg-bas').value}_${$('#gg-bit').value}.csv`, [
-    ['Dönem', 'Gelir', 'Tahsilat', 'Vergi giderleri', 'Diğer giderler', 'Komisyon', 'Toplam gider', 'Net'],
-    ...state.gg.map((x) => [x.etiket, x.gelir, x.tahsilat, x.vergi, x.diger_gider, x.komisyon, x.toplam_gider, x.net])]);
+    ['Dönem', 'Gelir (tahsilat)', 'Vergi giderleri', 'Diğer giderler', 'Komisyon', 'Toplam gider', 'Net', 'Bekleyen alacak'],
+    ...state.gg.map((x) => [x.etiket, x.gelir, x.vergi, x.diger_gider, x.komisyon, x.toplam_gider, x.net, x.alacak])]);
 });
 
 // ---------- Komisyon oranları ----------
@@ -465,5 +485,12 @@ $('#sifirla-form').addEventListener('submit', async (e) => {
   try { await api(`/api/kullanicilar/${f.get('id')}/sifre`, { method: 'POST', body: { yeni: f.get('yeni') } }); e.target.reset(); bildir('Şifre sıfırlandı'); }
   catch (err) { bildir(err.message); }
 });
+
+// Telefonda tablolar kart görünümüne geçer; her hücreye sütun başlığını etiket olarak yaz
+function tabloEtiketle(tbody) {
+  const basliklar = $$('thead th', tbody.closest('table')).map((th) => th.textContent.trim());
+  $$('tr', tbody).forEach((tr) => [...tr.children].forEach((td, i) => { if (basliklar[i]) td.dataset.label = basliklar[i]; }));
+}
+$$('.tablo tbody').forEach((tbody) => new MutationObserver(() => tabloEtiketle(tbody)).observe(tbody, { childList: true }));
 
 baslat();
