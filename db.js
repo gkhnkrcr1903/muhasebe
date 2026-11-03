@@ -1,52 +1,75 @@
-const { DatabaseSync } = require('node:sqlite');
 const crypto = require('node:crypto');
 const path = require('node:path');
-const fs = require('node:fs');
 
-const dbPath = process.env.DB_PATH || path.join(__dirname, 'data', 'muhasebe.db');
-fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+// DATABASE_URL varsa PostgreSQL'e (ör. Neon) bağlanır; yoksa yerel geliştirme için
+// dosyaya yazan gömülü PostgreSQL (PGlite) kullanılır.
+let client;
+async function connect() {
+  if (process.env.DATABASE_URL) {
+    const { Pool } = require('pg');
+    const pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: /localhost|127\.0\.0\.1/.test(process.env.DATABASE_URL) ? false : { rejectUnauthorized: false },
+      max: 5,
+    });
+    client = { query: (sql, params) => pool.query(sql, params) };
+  } else {
+    const { PGlite } = await import('@electric-sql/pglite');
+    const dir = process.env.PGLITE_DIR || path.join(__dirname, 'data', 'pglite');
+    require('node:fs').mkdirSync(path.dirname(dir), { recursive: true });
+    const pg = new PGlite(dir);
+    client = { query: (sql, params) => pg.query(sql, params) };
+    console.log('DATABASE_URL tanımlı değil, yerel veritabanı kullanılıyor (data/pglite).');
+  }
+}
 
-const db = new DatabaseSync(dbPath);
-db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
+async function all(sql, params = []) { return (await client.query(sql, params)).rows; }
+async function get(sql, params = []) { return (await all(sql, params))[0]; }
+async function run(sql, params = []) { const r = await client.query(sql, params); return r.rowCount ?? r.affectedRows ?? 0; }
 
-db.exec(`
-CREATE TABLE IF NOT EXISTS users (
-  id INTEGER PRIMARY KEY,
-  username TEXT UNIQUE NOT NULL,
-  display_name TEXT NOT NULL,
-  password_hash TEXT NOT NULL,
-  role TEXT NOT NULL CHECK (role IN ('admin','user'))
-);
-CREATE TABLE IF NOT EXISTS danisanlar (
-  id INTEGER PRIMARY KEY,
-  ad TEXT NOT NULL,
-  telefon TEXT,
-  varsayilan_ucret REAL NOT NULL DEFAULT 0,
-  notlar TEXT,
-  aktif INTEGER NOT NULL DEFAULT 1,
-  olusturma TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE TABLE IF NOT EXISTS seanslar (
-  id INTEGER PRIMARY KEY,
-  danisan_id INTEGER NOT NULL REFERENCES danisanlar(id),
-  user_id INTEGER NOT NULL REFERENCES users(id),
-  tarih TEXT NOT NULL,          -- YYYY-MM-DD
-  saat TEXT,                    -- HH:MM
-  ucret REAL NOT NULL DEFAULT 0,
-  durum TEXT NOT NULL DEFAULT 'planlandi' CHECK (durum IN ('planlandi','tamamlandi','iptal')),
-  odendi INTEGER NOT NULL DEFAULT 0,
-  notlar TEXT,
-  olusturma TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_seans_tarih ON seanslar(tarih);
-CREATE TABLE IF NOT EXISTS seans_gecmisi (
-  id INTEGER PRIMARY KEY,
-  seans_id INTEGER NOT NULL,
-  degistiren_id INTEGER NOT NULL,
-  aciklama TEXT NOT NULL,
-  zaman TEXT NOT NULL DEFAULT (datetime('now'))
-);
-`);
+const SIMDI = "to_char(now() AT TIME ZONE 'Europe/Istanbul', 'YYYY-MM-DD HH24:MI')";
+
+async function migrate() {
+  const ddl = [
+    `CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      username TEXT UNIQUE NOT NULL,
+      display_name TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL CHECK (role IN ('admin','user'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS danisanlar (
+      id SERIAL PRIMARY KEY,
+      ad TEXT NOT NULL,
+      telefon TEXT,
+      varsayilan_ucret DOUBLE PRECISION NOT NULL DEFAULT 0,
+      notlar TEXT,
+      aktif INTEGER NOT NULL DEFAULT 1,
+      olusturma TEXT NOT NULL DEFAULT ${SIMDI}
+    )`,
+    `CREATE TABLE IF NOT EXISTS seanslar (
+      id SERIAL PRIMARY KEY,
+      danisan_id INTEGER NOT NULL REFERENCES danisanlar(id),
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      tarih TEXT NOT NULL,
+      saat TEXT,
+      ucret DOUBLE PRECISION NOT NULL DEFAULT 0,
+      durum TEXT NOT NULL DEFAULT 'planlandi' CHECK (durum IN ('planlandi','tamamlandi','iptal')),
+      odendi INTEGER NOT NULL DEFAULT 0,
+      notlar TEXT,
+      olusturma TEXT NOT NULL DEFAULT ${SIMDI}
+    )`,
+    'CREATE INDEX IF NOT EXISTS idx_seans_tarih ON seanslar(tarih)',
+    `CREATE TABLE IF NOT EXISTS seans_gecmisi (
+      id SERIAL PRIMARY KEY,
+      seans_id INTEGER NOT NULL,
+      degistiren_id INTEGER NOT NULL,
+      aciklama TEXT NOT NULL,
+      zaman TEXT NOT NULL DEFAULT ${SIMDI}
+    )`,
+  ];
+  for (const sql of ddl) await client.query(sql);
+}
 
 function hashPassword(pw) {
   const salt = crypto.randomBytes(16).toString('hex');
@@ -66,16 +89,20 @@ const seedUsers = [
   { username: 'defne', display_name: 'Defne Çocuk ve Aile', role: 'user', env: 'DEFNE_PASSWORD' },
   { username: 'elda', display_name: 'Elda Psikoloji', role: 'user', env: 'ELDA_PASSWORD' },
 ];
-const insertUser = db.prepare(
-  'INSERT OR IGNORE INTO users (username, display_name, password_hash, role) VALUES (?, ?, ?, ?)'
-);
-for (const u of seedUsers) {
-  const exists = db.prepare('SELECT 1 FROM users WHERE username = ?').get(u.username);
-  if (!exists) {
+async function seed() {
+  for (const u of seedUsers) {
+    if (await get('SELECT 1 FROM users WHERE username = $1', [u.username])) continue;
     const pw = process.env[u.env] || 'degistir123';
-    insertUser.run(u.username, u.display_name, hashPassword(pw), u.role);
+    await run('INSERT INTO users (username, display_name, password_hash, role) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING',
+      [u.username, u.display_name, hashPassword(pw), u.role]);
     console.log(`Kullanıcı oluşturuldu: ${u.username}${process.env[u.env] ? '' : ' (varsayılan şifre: degistir123 — giriş yapınca değiştirin)'}`);
   }
 }
 
-module.exports = { db, hashPassword, verifyPassword };
+async function init() {
+  await connect();
+  await migrate();
+  await seed();
+}
+
+module.exports = { init, all, get, run, hashPassword, verifyPassword };

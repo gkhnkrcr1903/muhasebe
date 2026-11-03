@@ -1,7 +1,8 @@
 const express = require('express');
 const crypto = require('node:crypto');
 const path = require('node:path');
-const { db, hashPassword, verifyPassword } = require('./db');
+const db = require('./db');
+const { hashPassword, verifyPassword } = db;
 
 const app = express();
 app.set('trust proxy', 1);
@@ -11,6 +12,9 @@ app.use(express.static(path.join(__dirname, 'public')));
 const SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 if (!process.env.SESSION_SECRET) console.warn('UYARI: SESSION_SECRET tanımlı değil, yeniden başlatınca oturumlar düşer.');
 const TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+// Express 4 async hataları yakalamaz; route'ları sarmalıyoruz.
+const h = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 // ---------- Oturum (imzalı cookie) ----------
 function sign(data) {
@@ -40,13 +44,13 @@ function getCookie(req, name) {
   return null;
 }
 
-function auth(req, res, next) {
+const auth = h(async (req, res, next) => {
   const userId = readToken(getCookie(req, 'oturum'));
-  const user = userId && db.prepare('SELECT id, username, display_name, role FROM users WHERE id = ?').get(userId);
+  const user = userId && await db.get('SELECT id, username, display_name, role FROM users WHERE id = $1', [userId]);
   if (!user) return res.status(401).json({ hata: 'Giriş gerekli' });
   req.user = user;
   next();
-}
+});
 function adminOnly(req, res, next) {
   if (req.user.role !== 'admin') return res.status(403).json({ hata: 'Bu işlem için yetkiniz yok' });
   next();
@@ -54,16 +58,16 @@ function adminOnly(req, res, next) {
 const isAdmin = (req) => req.user.role === 'admin';
 
 // ---------- Giriş ----------
-app.post('/api/giris', (req, res) => {
+app.post('/api/giris', h(async (req, res) => {
   const { username, password } = req.body || {};
-  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(String(username || '').toLowerCase().trim());
+  const user = await db.get('SELECT * FROM users WHERE username = $1', [String(username || '').toLowerCase().trim()]);
   if (!user || !verifyPassword(String(password || ''), user.password_hash)) {
     return res.status(401).json({ hata: 'Kullanıcı adı veya şifre hatalı' });
   }
   const secure = req.secure ? '; Secure' : '';
   res.setHeader('Set-Cookie', `oturum=${makeToken(user.id)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${TOKEN_TTL_MS / 1000}${secure}`);
   res.json({ id: user.id, username: user.username, display_name: user.display_name, role: user.role });
-});
+}));
 
 app.post('/api/cikis', (req, res) => {
   res.setHeader('Set-Cookie', 'oturum=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0');
@@ -74,49 +78,47 @@ app.use('/api', auth);
 
 app.get('/api/ben', (req, res) => res.json(req.user));
 
-app.post('/api/sifre', (req, res) => {
+app.post('/api/sifre', h(async (req, res) => {
   const { eski, yeni } = req.body || {};
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  const user = await db.get('SELECT * FROM users WHERE id = $1', [req.user.id]);
   if (!verifyPassword(String(eski || ''), user.password_hash)) return res.status(400).json({ hata: 'Mevcut şifre hatalı' });
   if (!yeni || String(yeni).length < 6) return res.status(400).json({ hata: 'Yeni şifre en az 6 karakter olmalı' });
-  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(String(yeni)), req.user.id);
+  await db.run('UPDATE users SET password_hash = $1 WHERE id = $2', [hashPassword(String(yeni)), req.user.id]);
   res.json({ ok: true });
-});
+}));
 
 // ---------- Kullanıcılar ----------
-app.get('/api/kullanicilar', (req, res) => {
-  res.json(db.prepare('SELECT id, username, display_name, role FROM users ORDER BY id').all());
-});
+app.get('/api/kullanicilar', h(async (req, res) => {
+  res.json(await db.all('SELECT id, username, display_name, role FROM users ORDER BY id'));
+}));
 
-app.post('/api/kullanicilar/:id/sifre', adminOnly, (req, res) => {
+app.post('/api/kullanicilar/:id/sifre', adminOnly, h(async (req, res) => {
   const { yeni } = req.body || {};
   if (!yeni || String(yeni).length < 6) return res.status(400).json({ hata: 'Şifre en az 6 karakter olmalı' });
-  const r = db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(String(yeni)), Number(req.params.id));
-  if (!r.changes) return res.status(404).json({ hata: 'Kullanıcı bulunamadı' });
+  const changes = await db.run('UPDATE users SET password_hash = $1 WHERE id = $2', [hashPassword(String(yeni)), Number(req.params.id)]);
+  if (!changes) return res.status(404).json({ hata: 'Kullanıcı bulunamadı' });
   res.json({ ok: true });
-});
+}));
 
 // ---------- Danışanlar ----------
-app.get('/api/danisanlar', (req, res) => {
+app.get('/api/danisanlar', h(async (req, res) => {
   const tumu = req.query.tumu === '1';
-  res.json(db.prepare(`SELECT * FROM danisanlar ${tumu ? '' : 'WHERE aktif = 1'} ORDER BY ad COLLATE NOCASE`).all());
-});
+  res.json(await db.all(`SELECT * FROM danisanlar ${tumu ? '' : 'WHERE aktif = 1'} ORDER BY lower(ad)`));
+}));
 
-app.post('/api/danisanlar', (req, res) => {
+app.post('/api/danisanlar', h(async (req, res) => {
   const { ad, telefon, varsayilan_ucret, notlar } = req.body || {};
   if (!ad || !String(ad).trim()) return res.status(400).json({ hata: 'Danışan adı gerekli' });
-  const r = db.prepare('INSERT INTO danisanlar (ad, telefon, varsayilan_ucret, notlar) VALUES (?, ?, ?, ?)')
-    .run(String(ad).trim(), telefon || null, Number(varsayilan_ucret) || 0, notlar || null);
-  res.json(db.prepare('SELECT * FROM danisanlar WHERE id = ?').get(r.lastInsertRowid));
-});
+  res.json(await db.get('INSERT INTO danisanlar (ad, telefon, varsayilan_ucret, notlar) VALUES ($1, $2, $3, $4) RETURNING *',
+    [String(ad).trim(), telefon || null, Number(varsayilan_ucret) || 0, notlar || null]));
+}));
 
-app.put('/api/danisanlar/:id', (req, res) => {
+app.put('/api/danisanlar/:id', h(async (req, res) => {
   const { ad, telefon, varsayilan_ucret, notlar, aktif } = req.body || {};
   if (!ad || !String(ad).trim()) return res.status(400).json({ hata: 'Danışan adı gerekli' });
-  db.prepare('UPDATE danisanlar SET ad = ?, telefon = ?, varsayilan_ucret = ?, notlar = ?, aktif = ? WHERE id = ?')
-    .run(String(ad).trim(), telefon || null, Number(varsayilan_ucret) || 0, notlar || null, aktif === false || aktif === 0 ? 0 : 1, Number(req.params.id));
-  res.json(db.prepare('SELECT * FROM danisanlar WHERE id = ?').get(Number(req.params.id)));
-});
+  res.json(await db.get('UPDATE danisanlar SET ad = $1, telefon = $2, varsayilan_ucret = $3, notlar = $4, aktif = $5 WHERE id = $6 RETURNING *',
+    [String(ad).trim(), telefon || null, Number(varsayilan_ucret) || 0, notlar || null, aktif === false || aktif === 0 ? 0 : 1, Number(req.params.id)]));
+}));
 
 // ---------- Seanslar ----------
 const SEANS_SELECT = `
@@ -131,37 +133,36 @@ const DURUMLAR = ['planlandi', 'tamamlandi', 'iptal'];
 const DURUM_ETIKET = { planlandi: 'Planlandı', tamamlandi: 'Tamamlandı', iptal: 'İptal' };
 
 function getSeans(id) {
-  return db.prepare(`${SEANS_SELECT} WHERE s.id = ?`).get(id);
+  return db.get(`${SEANS_SELECT} WHERE s.id = $1`, [id]);
 }
 function canAccess(req, seans) {
   return isAdmin(req) || seans.user_id === req.user.id;
 }
 function logChange(seansId, userId, aciklama) {
-  db.prepare('INSERT INTO seans_gecmisi (seans_id, degistiren_id, aciklama) VALUES (?, ?, ?)').run(seansId, userId, aciklama);
+  return db.run('INSERT INTO seans_gecmisi (seans_id, degistiren_id, aciklama) VALUES ($1, $2, $3)', [seansId, userId, aciklama]);
 }
 
-function validateSeans(req, body, existing) {
-  const s = { ...existing, ...body };
+async function validateSeans(req, s) {
   if (!DATE_RE.test(s.tarih || '')) return 'Geçerli bir tarih girin';
   if (s.saat && !TIME_RE.test(s.saat)) return 'Saat SS:DD biçiminde olmalı';
   if (!DURUMLAR.includes(s.durum || 'planlandi')) return 'Geçersiz durum';
-  if (!db.prepare('SELECT 1 FROM danisanlar WHERE id = ?').get(Number(s.danisan_id))) return 'Danışan bulunamadı';
-  if (!db.prepare('SELECT 1 FROM users WHERE id = ? AND role = ?').get(Number(s.user_id), 'user')) return 'Seansı alacak kişi geçersiz';
-  if (!isAdmin(req) && Number(s.user_id) !== req.user.id) return 'Seansı yalnızca kendinize atayabilirsiniz';
+  if (!Number.isInteger(s.danisan_id) || !await db.get('SELECT 1 FROM danisanlar WHERE id = $1', [s.danisan_id])) return 'Danışan bulunamadı';
+  if (!Number.isInteger(s.user_id) || !await db.get("SELECT 1 FROM users WHERE id = $1 AND role = 'user'", [s.user_id])) return 'Seansı alacak kişi geçersiz';
+  if (!isAdmin(req) && s.user_id !== req.user.id) return 'Seansı yalnızca kendinize atayabilirsiniz';
   return null;
 }
 
-app.get('/api/seanslar', (req, res) => {
+app.get('/api/seanslar', h(async (req, res) => {
   const { baslangic, bitis, user_id } = req.query;
   if (!DATE_RE.test(baslangic || '') || !DATE_RE.test(bitis || '')) return res.status(400).json({ hata: 'Tarih aralığı gerekli' });
   const params = [baslangic, bitis];
-  let where = 'WHERE s.tarih BETWEEN ? AND ?';
-  if (!isAdmin(req)) { where += ' AND s.user_id = ?'; params.push(req.user.id); }
-  else if (user_id) { where += ' AND s.user_id = ?'; params.push(Number(user_id)); }
-  res.json(db.prepare(`${SEANS_SELECT} ${where} ORDER BY s.tarih, s.saat`).all(...params));
-});
+  let where = 'WHERE s.tarih BETWEEN $1 AND $2';
+  if (!isAdmin(req)) { params.push(req.user.id); where += ` AND s.user_id = $${params.length}`; }
+  else if (user_id) { params.push(Number(user_id)); where += ` AND s.user_id = $${params.length}`; }
+  res.json(await db.all(`${SEANS_SELECT} ${where} ORDER BY s.tarih, s.saat`, params));
+}));
 
-app.post('/api/seanslar', (req, res) => {
+app.post('/api/seanslar', h(async (req, res) => {
   const b = req.body || {};
   const data = {
     danisan_id: Number(b.danisan_id),
@@ -172,17 +173,18 @@ app.post('/api/seanslar', (req, res) => {
     odendi: b.odendi ? 1 : 0,
     notlar: b.notlar || null,
   };
-  const err = validateSeans(req, data, {});
+  const err = await validateSeans(req, data);
   if (err) return res.status(400).json({ hata: err });
-  const r = db.prepare(`INSERT INTO seanslar (danisan_id, user_id, tarih, saat, ucret, durum, odendi, notlar)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(data.danisan_id, data.user_id, data.tarih, data.saat, data.ucret, data.durum, data.odendi, data.notlar);
-  logChange(r.lastInsertRowid, req.user.id, 'Seans oluşturuldu');
-  res.json(getSeans(r.lastInsertRowid));
-});
+  const { id } = await db.get(`INSERT INTO seanslar (danisan_id, user_id, tarih, saat, ucret, durum, odendi, notlar)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+    [data.danisan_id, data.user_id, data.tarih, data.saat, data.ucret, data.durum, data.odendi, data.notlar]);
+  await logChange(id, req.user.id, 'Seans oluşturuldu');
+  res.json(await getSeans(id));
+}));
 
-app.put('/api/seanslar/:id', (req, res) => {
+app.put('/api/seanslar/:id', h(async (req, res) => {
   const id = Number(req.params.id);
-  const old = getSeans(id);
+  const old = await getSeans(id);
   if (!old || !canAccess(req, old)) return res.status(404).json({ hata: 'Seans bulunamadı' });
   const b = req.body || {};
   const data = {
@@ -195,12 +197,12 @@ app.put('/api/seanslar/:id', (req, res) => {
     odendi: b.odendi !== undefined ? (b.odendi ? 1 : 0) : old.odendi,
     notlar: b.notlar !== undefined ? (b.notlar || null) : old.notlar,
   };
-  const err = validateSeans(req, data, {});
+  const err = await validateSeans(req, data);
   if (err) return res.status(400).json({ hata: err });
-  db.prepare(`UPDATE seanslar SET danisan_id = ?, user_id = ?, tarih = ?, saat = ?, ucret = ?, durum = ?, odendi = ?, notlar = ? WHERE id = ?`)
-    .run(data.danisan_id, data.user_id, data.tarih, data.saat, data.ucret, data.durum, data.odendi, data.notlar, id);
+  await db.run(`UPDATE seanslar SET danisan_id = $1, user_id = $2, tarih = $3, saat = $4, ucret = $5, durum = $6, odendi = $7, notlar = $8 WHERE id = $9`,
+    [data.danisan_id, data.user_id, data.tarih, data.saat, data.ucret, data.durum, data.odendi, data.notlar, id]);
 
-  const fresh = getSeans(id);
+  const fresh = await getSeans(id);
   const changes = [];
   if (old.tarih !== fresh.tarih || old.saat !== fresh.saat) changes.push(`Zaman: ${old.tarih} ${old.saat || ''} → ${fresh.tarih} ${fresh.saat || ''}`);
   if (old.user_id !== fresh.user_id) changes.push(`Seansı alan: ${old.kullanici_ad} → ${fresh.kullanici_ad}`);
@@ -208,52 +210,62 @@ app.put('/api/seanslar/:id', (req, res) => {
   if (old.ucret !== fresh.ucret) changes.push(`Ücret: ${old.ucret} → ${fresh.ucret}`);
   if (old.durum !== fresh.durum) changes.push(`Durum: ${DURUM_ETIKET[old.durum]} → ${DURUM_ETIKET[fresh.durum]}`);
   if (old.odendi !== fresh.odendi) changes.push(fresh.odendi ? 'Ödeme alındı' : 'Ödeme geri alındı');
-  if (changes.length) logChange(id, req.user.id, changes.join('; '));
+  if (changes.length) await logChange(id, req.user.id, changes.join('; '));
   res.json(fresh);
-});
+}));
 
-app.delete('/api/seanslar/:id', (req, res) => {
+app.delete('/api/seanslar/:id', h(async (req, res) => {
   const id = Number(req.params.id);
-  const s = getSeans(id);
+  const s = await getSeans(id);
   if (!s || !canAccess(req, s)) return res.status(404).json({ hata: 'Seans bulunamadı' });
-  db.prepare('DELETE FROM seanslar WHERE id = ?').run(id);
-  logChange(id, req.user.id, `Seans silindi (${s.danisan_ad}, ${s.tarih})`);
+  await db.run('DELETE FROM seanslar WHERE id = $1', [id]);
+  await logChange(id, req.user.id, `Seans silindi (${s.danisan_ad}, ${s.tarih})`);
   res.json({ ok: true });
-});
+}));
 
-app.get('/api/seanslar/:id/gecmis', (req, res) => {
-  const s = getSeans(Number(req.params.id));
+app.get('/api/seanslar/:id/gecmis', h(async (req, res) => {
+  const s = await getSeans(Number(req.params.id));
   if (!s || !canAccess(req, s)) return res.status(404).json({ hata: 'Seans bulunamadı' });
-  res.json(db.prepare(`SELECT g.*, u.display_name AS degistiren FROM seans_gecmisi g
-    JOIN users u ON u.id = g.degistiren_id WHERE g.seans_id = ? ORDER BY g.id DESC`).all(s.id));
-});
+  res.json(await db.all(`SELECT g.*, u.display_name AS degistiren FROM seans_gecmisi g
+    JOIN users u ON u.id = g.degistiren_id WHERE g.seans_id = $1 ORDER BY g.id DESC`, [s.id]));
+}));
 
 // ---------- Raporlar ----------
 // grup: 'hafta' (pazartesi başlangıçlı) | 'ay'
-app.get('/api/rapor', (req, res) => {
+app.get('/api/rapor', h(async (req, res) => {
   const { baslangic, bitis } = req.query;
   const grup = req.query.grup === 'ay' ? 'ay' : 'hafta';
   if (!DATE_RE.test(baslangic || '') || !DATE_RE.test(bitis || '')) return res.status(400).json({ hata: 'Tarih aralığı gerekli' });
   const donemExpr = grup === 'ay'
-    ? "substr(s.tarih, 1, 7)"
-    : "date(s.tarih, '-' || ((CAST(strftime('%w', s.tarih) AS INTEGER) + 6) % 7) || ' days')";
+    ? 'substr(s.tarih, 1, 7)'
+    : "to_char(date_trunc('week', s.tarih::date), 'YYYY-MM-DD')";
   const params = [baslangic, bitis];
-  let where = "WHERE s.tarih BETWEEN ? AND ? AND s.durum != 'iptal'";
-  if (!isAdmin(req)) { where += ' AND s.user_id = ?'; params.push(req.user.id); }
-  const rows = db.prepare(`
+  let where = "WHERE s.tarih BETWEEN $1 AND $2 AND s.durum != 'iptal'";
+  if (!isAdmin(req)) { params.push(req.user.id); where += ` AND s.user_id = $${params.length}`; }
+  const rows = await db.all(`
     SELECT ${donemExpr} AS donem, s.user_id, u.display_name AS kullanici_ad,
-      COUNT(*) AS seans_sayisi,
-      SUM(CASE WHEN s.durum = 'tamamlandi' THEN 1 ELSE 0 END) AS tamamlanan,
+      COUNT(*)::int AS seans_sayisi,
+      SUM(CASE WHEN s.durum = 'tamamlandi' THEN 1 ELSE 0 END)::int AS tamamlanan,
       SUM(s.ucret) AS toplam_ucret,
       SUM(CASE WHEN s.odendi = 1 THEN s.ucret ELSE 0 END) AS tahsil_edilen,
       SUM(CASE WHEN s.odendi = 0 THEN s.ucret ELSE 0 END) AS bekleyen
     FROM seanslar s JOIN users u ON u.id = s.user_id
     ${where}
-    GROUP BY donem, s.user_id ORDER BY donem DESC, u.id`).all(...params);
+    GROUP BY donem, s.user_id, u.display_name, u.id ORDER BY donem DESC, u.id`, params);
   res.json({ grup, satirlar: rows });
-});
+}));
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
+app.use((err, req, res, next) => {
+  console.error(err);
+  res.status(500).json({ hata: 'Sunucu hatası' });
+});
+
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Muhasebe uygulaması http://localhost:${PORT} adresinde çalışıyor`));
+db.init().then(() => {
+  app.listen(PORT, () => console.log(`Muhasebe uygulaması http://localhost:${PORT} adresinde çalışıyor`));
+}).catch((err) => {
+  console.error('Veritabanına bağlanılamadı:', err);
+  process.exit(1);
+});

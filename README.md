@@ -11,7 +11,7 @@ Defne Çocuk ve Aile ile Elda Psikoloji için danışan seanslarının ve ücret
 - Yetki: admin tüm seansları görür ve herkese atayabilir; diğer kullanıcılar yalnızca kendi seanslarını görür/düzenler
 
 ## Çalıştırma
-Node.js 22.13+ gerekir (yerleşik `node:sqlite` kullanılır).
+Node.js 22.13+ gerekir. Veriler PostgreSQL'de tutulur; `DATABASE_URL` verilmezse yerelde gömülü PostgreSQL (PGlite, `data/pglite`) kullanılır, ek kurulum gerekmez.
 
 ```bash
 npm install
@@ -25,10 +25,16 @@ Uygulama http://localhost:3000 adresinde açılır.
 |---|---|
 | `PORT` | Sunucu portu (varsayılan 3000) |
 | `SESSION_SECRET` | Oturum imzalama anahtarı — yayında mutlaka uzun rastgele bir değer verin |
-| `DB_PATH` | SQLite dosya yolu (varsayılan `data/muhasebe.db`) |
+| `DATABASE_URL` | PostgreSQL bağlantı adresi (ör. Neon). Yoksa yerel PGlite kullanılır |
 | `ADMIN_PASSWORD`, `DEFNE_PASSWORD`, `ELDA_PASSWORD` | İlk kurulumda kullanıcı şifreleri |
 
 Şifre değişkenleri verilmezse ilk kurulumda şifre `degistir123` olur; ilk girişte **Ayarlar** sekmesinden değiştirin.
 
 ## Yayınlama
-Kalıcı disk sunan bir platform gerekir (Render, Railway, Fly.io, VPS vb.). `DB_PATH`'i kalıcı diske yönlendirin ve `SESSION_SECRET` tanımlayın.
+Ücretsiz kurulum: Render (free web servisi) + Neon (ücretsiz PostgreSQL).
+
+1. https://neon.tech üzerinde proje oluşturun, **Connection string**'i kopyalayın.
+2. Render'da **New → Blueprint** ile bu repoyu seçin (`render.yaml` okunur).
+3. `DATABASE_URL` alanına Neon adresini, şifre alanlarına kullanıcı şifrelerini girin.
+
+Not: Render free planında servis 15 dk kullanılmazsa uyur; ilk açılış ~30-50 sn sürebilir. Veriler Neon'da kalıcıdır.
