@@ -83,6 +83,10 @@ async function migrate() {
     // Tahsilat esaslı gelir için ödemenin alındığı gün
     'ALTER TABLE seanslar ADD COLUMN IF NOT EXISTS odeme_tarihi TEXT',
     'UPDATE seanslar SET odeme_tarihi = tarih WHERE odendi = 1 AND odeme_tarihi IS NULL',
+    // Uygulama geneli ayarlar (anahtar/değer)
+    'CREATE TABLE IF NOT EXISTS ayarlar (anahtar TEXT PRIMARY KEY, deger TEXT NOT NULL)',
+    // Varsayılan: admin dışındaki kullanıcılar kendi şifresini değiştiremez
+    "INSERT INTO ayarlar (anahtar, deger) VALUES ('sifre_degistirme_acik', '0') ON CONFLICT DO NOTHING",
   ];
   for (const sql of ddl) await client.query(sql);
 }
@@ -106,6 +110,11 @@ const seedUsers = [
   { username: 'elda', display_name: 'Elda Psikoloji', role: 'user', env: 'ELDA_PASSWORD' },
 ];
 async function seed() {
+  // Admin şifresi unutulursa: ADMIN_SIFRE_SIFIRLA=1 ile açılışta ADMIN_PASSWORD'e sıfırlanır
+  if (process.env.ADMIN_SIFRE_SIFIRLA === '1' && process.env.ADMIN_PASSWORD) {
+    await run("UPDATE users SET password_hash = $1 WHERE username = 'gokhan'", [hashPassword(process.env.ADMIN_PASSWORD)]);
+    console.log('Admin şifresi ADMIN_PASSWORD ile sıfırlandı. ADMIN_SIFRE_SIFIRLA değişkenini kaldırmayı unutmayın.');
+  }
   for (const u of seedUsers) {
     if (await get('SELECT 1 FROM users WHERE username = $1', [u.username])) continue;
     const pw = process.env[u.env] || 'degistir123';

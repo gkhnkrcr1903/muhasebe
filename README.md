@@ -1,5 +1,7 @@
 # Seans Muhasebe
 
+> Ayrıntılı çalıştırma, yapı ve bakım bilgileri: [UYGULAMA_BILGILERI.md](UYGULAMA_BILGILERI.md)
+
 Defne Çocuk ve Aile ile Elda Psikoloji için danışan seanslarının ve ücretlerinin takip edildiği web uygulaması.
 
 ## Özellikler

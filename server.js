@@ -81,9 +81,28 @@ app.post('/api/cikis', (req, res) => {
 
 app.use('/api', auth);
 
-app.get('/api/ben', (req, res) => res.json(req.user));
+// ---------- Ayarlar ----------
+async function ayarlariGetir() {
+  const rows = await db.all('SELECT anahtar, deger FROM ayarlar');
+  const a = Object.fromEntries(rows.map((r) => [r.anahtar, r.deger]));
+  return { sifre_degistirme_acik: a.sifre_degistirme_acik === '1' };
+}
+
+app.get('/api/ben', h(async (req, res) => res.json({ ...req.user, ayarlar: await ayarlariGetir() })));
+
+app.put('/api/ayarlar', adminOnly, h(async (req, res) => {
+  const b = req.body || {};
+  if (b.sifre_degistirme_acik !== undefined) {
+    await db.run(`INSERT INTO ayarlar (anahtar, deger) VALUES ('sifre_degistirme_acik', $1)
+      ON CONFLICT (anahtar) DO UPDATE SET deger = EXCLUDED.deger`, [b.sifre_degistirme_acik ? '1' : '0']);
+  }
+  res.json(await ayarlariGetir());
+}));
 
 app.post('/api/sifre', h(async (req, res) => {
+  if (!isAdmin(req) && !(await ayarlariGetir()).sifre_degistirme_acik) {
+    return res.status(403).json({ hata: 'Şifre değişikliği yönetici tarafından kapatılmış' });
+  }
   const { eski, yeni } = req.body || {};
   const user = await db.get('SELECT * FROM users WHERE id = $1', [req.user.id]);
   if (!verifyPassword(String(eski || ''), user.password_hash)) return res.status(400).json({ hata: 'Mevcut şifre hatalı' });

@@ -158,6 +158,15 @@
         <!-- Ayarlar -->
         <section id="sekme-ayarlar" class="sekme hidden">
           <div class="ayar-grid">
+            <div class="kart sadece-admin">
+              <h3>Kullanıcı izinleri</h3>
+              <label class="satir"><input type="checkbox" id="ayar-sifre-acik"> Kullanıcılar kendi şifresini değiştirebilsin</label>
+              <p class="ipucu">Kapalıyken yalnızca yönetici şifre belirleyebilir (aşağıdaki "Kullanıcı şifresi sıfırla").</p>
+            </div>
+            <div class="kart" id="sifre-kilitli">
+              <h3>Şifre</h3>
+              <p class="ipucu">Şifre değişikliği yönetici tarafından kapatılmıştır. Yeni şifre için yöneticiye başvurun.</p>
+            </div>
             <form id="sifre-form" class="kart">
               <h3>Şifremi değiştir</h3>
               <label>Mevcut şifre <input type="password" name="eski" required></label>

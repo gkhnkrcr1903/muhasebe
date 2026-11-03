@@ -65,6 +65,7 @@ async function baslat() {
   $('#ben-avatar').textContent = state.ben.display_name.split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toLocaleUpperCase('tr');
   const admin = state.ben.role === 'admin';
   $$('.sadece-admin').forEach((el) => el.classList.toggle('hidden', !admin));
+  sifreAlaniGuncelle();
 
   state.kullanicilar = await api('/api/kullanicilar');
   const terapistler = state.kullanicilar.filter((u) => u.role === 'user');
@@ -473,6 +474,18 @@ $('#komisyon-form').addEventListener('submit', async (e) => {
 });
 
 // ---------- Ayarlar ----------
+function sifreAlaniGuncelle() {
+  const acik = state.ben.role === 'admin' || state.ben.ayarlar.sifre_degistirme_acik;
+  $('#sifre-form').classList.toggle('hidden', !acik);
+  $('#sifre-kilitli').classList.toggle('hidden', acik);
+  $('#ayar-sifre-acik').checked = state.ben.ayarlar.sifre_degistirme_acik;
+}
+$('#ayar-sifre-acik').addEventListener('change', async (e) => {
+  try {
+    state.ben.ayarlar = await api('/api/ayarlar', { method: 'PUT', body: { sifre_degistirme_acik: e.target.checked } });
+    bildir(state.ben.ayarlar.sifre_degistirme_acik ? 'Kullanıcılar artık şifre değiştirebilir' : 'Kullanıcıların şifre değiştirmesi kapatıldı');
+  } catch (err) { e.target.checked = !e.target.checked; bildir(err.message); }
+});
 $('#sifre-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = new FormData(e.target);
